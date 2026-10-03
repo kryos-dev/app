@@ -16,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       KS: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
+      # Read by app.config.ts (versionCode) and lib/update.ts (installed build).
+      EXPO_PUBLIC_BUILD: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
 

@@ -1,4 +1,3 @@
-import { delSecret } from '../storage';
 import { setGatewayKey } from './http';
 import { logout } from './dashboard';
 import { health } from './gateway';
@@ -7,7 +6,6 @@ import { health } from './gateway';
 export async function signOut(): Promise<void> {
   await logout().catch(() => {});
   await setGatewayKey(null);
-  await delSecret('kryos.opencodePassword');
 }
 
 // Poll gateway /health until 200. Waits first so the old process going down is not mistaken for up.

@@ -90,7 +90,6 @@ export default function SignIn() {
               <Card>
                 {field('dashboardBase', 'Dashboard URL')}
                 {field('gatewayBase', 'Gateway URL')}
-                {field('opencodeBase', 'OpenCode URL')}
               </Card>
             )}
           </>

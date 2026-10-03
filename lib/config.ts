@@ -4,7 +4,6 @@ import { getJSON, setJSON } from './storage';
 export interface Settings {
   dashboardBase: string;
   gatewayBase: string;
-  opencodeBase: string;
 }
 
 const SETTINGS_KEY = 'kryos.settings';
@@ -12,12 +11,11 @@ const SETTINGS_KEY = 'kryos.settings';
 export function defaultSettings(): Settings {
   if (Platform.OS === 'web') {
     const o = typeof window === 'undefined' ? '' : window.location.origin;
-    return { dashboardBase: o, gatewayBase: `${o}/gw`, opencodeBase: `${o}/opencode` };
+    return { dashboardBase: o, gatewayBase: `${o}/gw` };
   }
   return {
     dashboardBase: 'https://hermes.kryos.dev',
     gatewayBase: 'https://api.kryos.dev/hermes',
-    opencodeBase: 'https://api.kryos.dev/opencode',
   };
 }
 
@@ -35,7 +33,7 @@ export async function loadSettings(): Promise<Settings> {
 }
 
 export async function saveSettings(s: Settings): Promise<void> {
-  current = { ...s, dashboardBase: trim(s.dashboardBase), gatewayBase: trim(s.gatewayBase), opencodeBase: trim(s.opencodeBase) };
+  current = { ...s, dashboardBase: trim(s.dashboardBase), gatewayBase: trim(s.gatewayBase) };
   if (Platform.OS !== 'web') await setJSON(SETTINGS_KEY, current);
 }
 

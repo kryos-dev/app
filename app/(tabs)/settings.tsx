@@ -7,6 +7,7 @@ import { useAuth } from '../../lib/auth';
 import { getSettings, saveSettings, type Settings as ServerSettings } from '../../lib/config';
 import * as dash from '../../lib/api/dashboard';
 import { errText, signOut, waitForGateway } from '../../lib/api/apps-settings-extra';
+import { checkForUpdate, currentBuild, type UpdateInfo } from '../../lib/update';
 import type { ModelOptionsResponse } from '../../lib/types';
 
 const isWeb = Platform.OS === 'web';
@@ -28,6 +29,7 @@ export default function SettingsScreen() {
   const [confirmTarget, setConfirmTarget] = useState<{ provider: string; model: string } | null>(null);
   const [gwMsg, setGwMsg] = useState('');
   const [gwBusy, setGwBusy] = useState(false);
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
 
   const loadModel = useCallback(() => {
     dash.model.options().then(setOptions).catch((e) => setModelMsg(errText(e)));
@@ -37,6 +39,7 @@ export default function SettingsScreen() {
   useEffect(() => {
     dash.me().then((m) => setName(m.display_name || m.email || m.user_id)).catch(() => {});
     loadModel();
+    checkForUpdate().then(setUpdate);
   }, [loadModel]);
 
   const logout = async () => {
@@ -82,6 +85,13 @@ export default function SettingsScreen() {
     <Screen scroll>
       <Text variant="title">Settings</Text>
 
+      {update && (
+        <Card>
+          <Text variant="heading">Update available: build {update.latest}</Text>
+          <Button title="Download APK" onPress={() => Linking.openURL(update.url)} />
+        </Card>
+      )}
+
       <Card>
         <Text variant="heading">Account</Text>
         <Text variant="muted">{name || 'Signed in'}</Text>
@@ -91,7 +101,7 @@ export default function SettingsScreen() {
       {!isWeb && (
         <Card>
           <Text variant="heading">Servers</Text>
-          {(['dashboardBase', 'gatewayBase', 'opencodeBase'] as const).map((k) => (
+          {(['dashboardBase', 'gatewayBase'] as const).map((k) => (
             <Input
               key={k}
               value={s[k]}
@@ -150,6 +160,7 @@ export default function SettingsScreen() {
       <Card>
         <Text variant="heading">About</Text>
         <Text variant="muted">Version {Constants.expoConfig?.version ?? 'unknown'}</Text>
+        {!isWeb && <Text variant="muted">Build {currentBuild}</Text>}
         <Button title="Latest release" variant="ghost" onPress={() => Linking.openURL('https://github.com/kryos-dev/app/releases/latest')} />
       </Card>
     </Screen>

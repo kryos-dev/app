@@ -20,7 +20,6 @@ export function onAuthExpired(fn: () => void): () => void {
 export const emitAuthExpired = () => listeners.forEach((fn) => fn());
 
 const GW_KEY = 'kryos.gatewayKey';
-const OC_PW = 'kryos.opencodePassword';
 let gatewayKey: string | null = null;
 
 export async function loadGatewayKey(): Promise<string | null> {
@@ -33,10 +32,8 @@ export async function setGatewayKey(k: string | null): Promise<void> {
   if (k) await setSecret(GW_KEY, k);
   else await delSecret(GW_KEY);
 }
-export const getOpencodePassword = () => getSecret(OC_PW);
-export const setOpencodePassword = (p: string) => setSecret(OC_PW, p);
 
-export type Kind = 'dashboard' | 'gateway' | 'opencode';
+export type Kind = 'dashboard' | 'gateway';
 
 export interface ReqOpts {
   method?: string;
@@ -48,7 +45,7 @@ export interface ReqOpts {
 
 function baseFor(kind: Kind): string {
   const s = getSettings();
-  return kind === 'dashboard' ? s.dashboardBase : kind === 'gateway' ? s.gatewayBase : s.opencodeBase;
+  return kind === 'dashboard' ? s.dashboardBase : s.gatewayBase;
 }
 
 export function buildUrl(kind: Kind, path: string, query?: ReqOpts['query']): string {
@@ -72,11 +69,8 @@ export async function buildInit(kind: Kind, o: ReqOpts): Promise<RequestInit> {
   }
   if (kind === 'dashboard') {
     init.credentials = 'include';
-  } else if (kind === 'gateway') {
-    if (gatewayKey) headers.Authorization = `Bearer ${gatewayKey}`;
-  } else {
-    const pw = (await getOpencodePassword()) ?? '';
-    headers.Authorization = `Basic ${btoa(`opencode:${pw}`)}`;
+  } else if (gatewayKey) {
+    headers.Authorization = `Bearer ${gatewayKey}`;
   }
   return init;
 }

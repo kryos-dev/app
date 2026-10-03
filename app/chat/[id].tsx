@@ -5,6 +5,7 @@ import { Button, Screen, Spinner, Text } from '../../components/ui';
 import { MessageBubble, type ChatItem } from '../../components/chat/MessageBubble';
 import { Composer, type EffortChoice } from '../../components/chat/Composer';
 import * as gateway from '../../lib/api/gateway';
+import { getJSON, setJSON } from '../../lib/storage';
 import { space } from '../../lib/theme';
 import type { Message, SseEvent } from '../../lib/types';
 
@@ -37,6 +38,14 @@ export default function Thread() {
   const [error, setError] = useState<string | null>(null);
   const [usage, setUsage] = useState<string | null>(null);
   const [effort, setEffort] = useState<EffortChoice>('default');
+  // The chosen reasoning effort persists across chats and launches.
+  useEffect(() => {
+    getJSON<EffortChoice>('kryos.effort').then((e) => e && setEffort(e));
+  }, []);
+  const pickEffort = (e: EffortChoice) => {
+    setEffort(e);
+    setJSON('kryos.effort', e);
+  };
   const listRef = useRef<FlatList<ChatItem>>(null);
   const abortRef = useRef<AbortController | null>(null);
   const prevRef = useRef<string | null>(null);
@@ -161,7 +170,7 @@ export default function Thread() {
             }
           />
         )}
-        <Composer busy={busy} effort={effort} onEffort={setEffort} onSend={send} onStop={() => abortRef.current?.abort()} />
+        <Composer busy={busy} effort={effort} onEffort={pickEffort} onSend={send} onStop={() => abortRef.current?.abort()} />
       </KeyboardAvoidingView>
     </Screen>
   );

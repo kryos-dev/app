@@ -121,3 +121,33 @@ export const model = {
       ...b,
     }),
 };
+
+// Provider sign-in routes (device-code flow); the server owns all state, the client only starts and polls.
+export interface OauthProvider {
+  id: string;
+  name: string;
+  flow: string;
+  cli_command?: string;
+  disconnect_command?: string | null;
+  disconnect_hint?: string | null;
+  disconnectable: boolean;
+  status: { logged_in: boolean; source_label?: string; token_preview?: string | null; expires_at?: string | null };
+}
+export interface OauthStart {
+  session_id: string;
+  flow: string;
+  user_code: string;
+  verification_url: string;
+  expires_in: number;
+  poll_interval: number;
+}
+export type OauthPollStatus = 'pending' | 'approved' | 'denied' | 'expired' | 'error' | 'cancelled';
+export const providerOauth = {
+  list: () => d<{ providers: OauthProvider[] }>('/api/providers/oauth'),
+  start: (id: string) => post<OauthStart>(`/api/providers/oauth/${enc(id)}/start`),
+  poll: (id: string, sessionId: string) =>
+    d<{ session_id: string; status: OauthPollStatus; error_message?: string | null }>(
+      `/api/providers/oauth/${enc(id)}/poll/${enc(sessionId)}`,
+    ),
+  disconnect: (id: string) => del<{ ok: boolean }>(`/api/providers/oauth/${enc(id)}`),
+};
