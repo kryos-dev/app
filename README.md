@@ -15,7 +15,7 @@ https://github.com/kryos-dev/app/releases/latest/download/kryos.apk
 
 ## Web
 
-`npx expo export -p web` writes a static site to `dist/`. Hosting is Vercel: import the repo at https://vercel.com/new; `vercel.json` carries the build settings. The `web` workflow only checks that the export builds.
+`npx expo export -p web` writes a static site to `dist/`. The web build ships as `ghcr.io/kryos-dev/app/web` and is served at https://app.kryos.dev by the infra repo (`apps/app`). It is same-origin with the Hermes dashboard and gateway, which is why it is not on Vercel (the dashboard allows only localhost CORS and uses SameSite cookies).
 
 ## Signing key
 
