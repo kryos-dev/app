@@ -1,0 +1,62 @@
+name: release
+
+# Builds an installable APK on GitHub's free Linux runners and publishes it
+# as a GitHub Release. No EAS, no Codemagic, no Mac: Android tooling is all
+# JVM + SDK, so the whole build is `expo prebuild` followed by Gradle.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      KS: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # ubuntu-latest ships the Android SDK at $ANDROID_HOME with licenses
+      # accepted; setup-android@v3 fails on it ("Failed to find package
+      # 'tools'"), and Gradle fetches any missing platform itself.
+      - run: npm ci
+
+      - run: npx tsc --noEmit
+
+      # android/ is generated, never committed: the config lives in app.json.
+      - run: npx expo prebuild --platform android --clean
+
+      # Expo's generated build.gradle signs the release variant with
+      # signingConfigs.debug, so a stable keystore under that name (alias
+      # androiddebugkey, password android) gives every build the same
+      # signature and the phone accepts updates in place. Without the secret
+      # the runner's throwaway key is used and each update needs an uninstall.
+      - name: Install stable signing key
+        if: env.KS != ''
+        run: printf '%s' "$KS" | base64 -d > android/app/debug.keystore
+
+      - run: ./gradlew assembleRelease --no-daemon
+        working-directory: android
+
+      - run: cp android/app/build/outputs/apk/release/app-release.apk kryos.apk
+
+      - run: >-
+          gh release create "build-${{ github.run_number }}" kryos.apk
+          --latest
+          --title "Kryos build ${{ github.run_number }}"
+          --notes "Android APK built from ${{ github.sha }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
