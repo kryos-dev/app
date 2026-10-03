@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Platform } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { KeyboardAvoidingView, Modal, Platform, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { WebView } from 'react-native-webview';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { colors, space } from '../../lib/theme';
 import { Button, Card, Input, Screen, Text } from '../../components/ui';
-import { useAuth } from '../../lib/auth';
+import { revealAndStoreGatewayKey, useAuth } from '../../lib/auth';
 import { getSettings, saveSettings, type Settings } from '../../lib/config';
 import { ApiError, setGatewayKey } from '../../lib/api/http';
 import * as dash from '../../lib/api/dashboard';
@@ -28,10 +31,46 @@ export default function SignIn() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
+  const [sso, setSso] = useState<dash.AuthProvider | null>(null);
+
   useEffect(() => setSettings(getSettings()), []);
 
-  const finish = async (key: string) => {
-    await setGatewayKey(key);
+  // A provider that is not password-capable is an OIDC redirect login.
+  useEffect(() => {
+    dash
+      .providers()
+      .then((r) => setSso(r.providers.find((p) => !p.supports_password) ?? null))
+      .catch(() => {});
+  }, []);
+
+  const [ssoOpen, setSsoOpen] = useState(false);
+  const ssoDone = useRef(false);
+
+  // Web redirects the page; native runs the login in a WebView whose cookies fetch then shares.
+  const ssoLogin = () => {
+    if (!sso) return;
+    if (isWeb) window.location.assign(`/auth/login?provider=${encodeURIComponent(sso.name)}&next=/`);
+    else {
+      ssoDone.current = false;
+      setSsoOpen(true);
+    }
+  };
+
+  const onSsoNav = async (n: { url: string }) => {
+    if (ssoDone.current || !n.url.startsWith(`${getSettings().dashboardBase}/signed-in`)) return;
+    ssoDone.current = true;
+    setSsoOpen(false);
+    try {
+      await finish();
+    } catch (e) {
+      setManualKey('');
+      setError(`Signed in, but the API key could not be fetched (${errMsg(e)}). Paste it below.`);
+    }
+  };
+
+  const finish = async (key?: string) => {
+    if (key) await setGatewayKey(key);
+    else await revealAndStoreGatewayKey();
     setSignedIn(true);
     router.replace('/(tabs)/chat');
   };
@@ -49,7 +88,7 @@ export default function SignIn() {
           .catch(() => 'password');
         await dash.passwordLogin(username, password, provider);
         try {
-          await finish((await dash.revealEnv('API_SERVER_KEY')).value);
+          await finish();
         } catch (e) {
           setManualKey('');
           setError(`Signed in, but the API key could not be fetched (${errMsg(e)}). Paste it below.`);
@@ -73,6 +112,7 @@ export default function SignIn() {
     <Screen scroll>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ gap: 12 }}>
         <Text variant="title">Kryos</Text>
+        {sso && <Button title={sso.display_name || 'Sign in with auth.kryos.dev'} onPress={ssoLogin} />}
         {manualKey === null ? (
           <>
             <Input placeholder="Username" value={username} onChangeText={setUsername} textContentType="username" />
@@ -95,6 +135,24 @@ export default function SignIn() {
           </>
         )}
       </KeyboardAvoidingView>
+      {!isWeb && sso && (
+        <Modal visible={ssoOpen} animationType="slide" onRequestClose={() => setSsoOpen(false)}>
+          <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+            <View style={{ padding: space.sm, alignItems: 'flex-start' }}>
+              <Button title="Close" variant="ghost" onPress={() => setSsoOpen(false)} />
+            </View>
+            <WebView
+              source={{ uri: `${getSettings().dashboardBase}/auth/login?provider=${encodeURIComponent(sso.name)}&next=/signed-in` }}
+              sharedCookiesEnabled
+              thirdPartyCookiesEnabled
+              javaScriptEnabled
+              incognito={false}
+              onNavigationStateChange={onSsoNav}
+              style={{ flex: 1, backgroundColor: colors.bg }}
+            />
+          </SafeAreaView>
+        </Modal>
+      )}
     </Screen>
   );
 }

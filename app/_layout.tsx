@@ -3,7 +3,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Spinner } from '../components/ui';
-import { AuthContext } from '../lib/auth';
+import { AuthContext, revealAndStoreGatewayKey } from '../lib/auth';
 import { loadSettings } from '../lib/config';
 import { loadGatewayKey, onAuthExpired } from '../lib/api/http';
 import * as dash from '../lib/api/dashboard';
@@ -19,7 +19,9 @@ export default function Layout() {
       const key = await loadGatewayKey();
       try {
         await dash.me();
-        setSignedIn(!!key);
+        // A dashboard session without a stored key happens after an OIDC redirect.
+        if (!key) await revealAndStoreGatewayKey();
+        setSignedIn(true);
       } catch {
         setSignedIn(false);
       }

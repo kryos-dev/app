@@ -14,8 +14,8 @@ export function defaultSettings(): Settings {
     return { dashboardBase: o, gatewayBase: `${o}/gw` };
   }
   return {
-    dashboardBase: 'https://hermes.kryos.dev',
-    gatewayBase: 'https://api.kryos.dev/hermes',
+    dashboardBase: 'https://app.kryos.dev',
+    gatewayBase: 'https://app.kryos.dev/gw',
   };
 }
 
