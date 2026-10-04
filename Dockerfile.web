@@ -1,6 +1,0 @@
-# Built by the web workflow after `expo export -p web`. Served behind the VM's
-# front-door Caddy, which proxies /api, /auth, and /gw to the Hermes
-# services, so this image only serves files.
-FROM caddy:2.11.4-alpine
-COPY dist /srv
-COPY Caddyfile.web /etc/caddy/Caddyfile

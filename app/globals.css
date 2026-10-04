@@ -1,0 +1,325 @@
+@import "tailwindcss";
+
+@import "tw-animate-css";
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --font-mono: var(--font-geist-mono);
+  --spacing-app-header: 56px;
+  --spacing-input-area: 134px;
+
+  /* UI text scale (sidebar/history/header/chat-input): base 14px = text-sm,
+     secondary 13px = text-13, group labels 12px muted = text-xs + text-muted-foreground.
+     Row height 32px = h-8. Reuse these everywhere instead of one-off sizes. */
+  --text-13: 0.8125rem;
+  --text-13--line-height: 1.125rem;
+
+  /* READING text, which is a different job from UI text and was using the same
+     size as a sidebar row. A chat app is a reading app: most of its screen time
+     is spent on paragraphs of assistant prose, and 14px/1.25 is a size for
+     labels and buttons, not for a long answer on a phone held at arm's length.
+
+     16px with a 1.7 line height, which is the range claude.ai and ChatGPT both
+     sit in. Do not reuse this for UI chrome -- that is what text-sm is for. */
+  --text-message: 1rem;
+  --text-message--line-height: 1.7;
+
+  @keyframes loading-dots {
+    0%,
+    100% {
+      opacity: 0;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive: var(--destructive);
+  --color-success-foreground: var(--success-foreground);
+  --color-success: var(--success);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning: var(--warning);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --spacing-scroll-area: calc(
+    -1 * (var(--spacing-input-area) + var(--spacing-app-header))
+  );
+  --spacing-scroll-anchor-offset: 140px;
+  --spacing-scroll-anchor: calc(
+    var(--spacing-scroll-area) - var(--spacing-scroll-anchor-offset) + 100dvh
+  );
+}
+
+/* Linear theme (owner, 2026-09-16: "i want linear theme"), written into the
+   shadcn variable set the owner pasted as the reference. Cool neutral greys,
+   near-black canvas in dark with the sidebar one step lighter, hairline
+   borders, ink-coloured primary buttons as Linear and Vercel draw them, and
+   Linear's indigo kept for the focus ring and charts only. The sidebar is
+   the page colour and content sits on it as an inset panel (shadcn Sidebar
+   variant="inset"). Change values here, never in components:
+   every colour in the app must come from one of these tokens. */
+:root {
+  --background: oklch(1 0 0);                    /* #ffffff */
+  --foreground: oklch(0.21 0.006 285.9);         /* #1b1b1f */
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.006 285.9);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.006 285.9);
+  --primary: oklch(0.21 0.006 285.9);               /* #5e6ad2 Linear indigo */
+  --primary-foreground: oklch(0.985 0.001 286);
+  --secondary: oklch(0.97 0.002 286);            /* #f4f4f6 */
+  --secondary-foreground: oklch(0.21 0.006 285.9);
+  --muted: oklch(0.97 0.002 286);
+  --muted-foreground: oklch(0.55 0.01 286);      /* #6b6f76 */
+  --accent: oklch(0.955 0.003 286);              /* #eeeef1 hover row */
+  --accent-foreground: oklch(0.21 0.006 285.9);
+  --destructive: oklch(0.58 0.22 27);            /* #eb5757 */
+  --destructive-foreground: oklch(1 0 0);
+  --success: oklch(0.6 0.12 155);                /* muted green: ok / exit 0 / added */
+  --success-foreground: oklch(1 0 0);
+  --warning: oklch(0.72 0.14 70);                /* amber: pending / priority */
+  --warning-foreground: oklch(0.21 0.006 285.9);
+  --border: oklch(0.92 0.004 286);               /* #e4e4e8 hairline */
+  --input: oklch(0.92 0.004 286);
+  --ring: oklch(0.55 0.13 277);
+  --chart-1: oklch(0.55 0.13 277);
+  --chart-2: oklch(0.65 0.12 277);
+  --chart-3: oklch(0.72 0.1 200);
+  --chart-4: oklch(0.75 0.14 75);
+  --chart-5: oklch(0.65 0.15 150);
+  --radius: 0.5rem;                              /* Linear's 6-8px corners */
+  --sidebar: oklch(0.97 0.002 286);             /* #fbfbfc */
+  --sidebar-foreground: oklch(0.21 0.006 285.9);
+  --sidebar-primary: oklch(0.21 0.006 285.9);
+  --sidebar-primary-foreground: oklch(0.985 0.001 286);
+  --sidebar-accent: oklch(0.93 0.004 286);      /* #ececf0 active row */
+  --sidebar-accent-foreground: oklch(0.21 0.006 285.9);
+  --sidebar-border: oklch(0.92 0.004 286);
+  --sidebar-ring: oklch(0.55 0.13 277);
+}
+
+.dark {
+  --background: oklch(0.18 0.004 286);          /* #08090a */
+  --foreground: oklch(0.975 0.002 286);          /* #f7f8f8 */
+  --card: oklch(0.2 0.005 286);                 /* #0f1011 */
+  --card-foreground: oklch(0.975 0.002 286);
+  --popover: oklch(0.215 0.005 286);               /* #141516 */
+  --popover-foreground: oklch(0.975 0.002 286);
+  --primary: oklch(0.975 0.002 286);                /* #6e79d6 indigo, lifted for dark */
+  --primary-foreground: oklch(0.18 0.004 286);
+  --secondary: oklch(0.23 0.005 286);            /* #1c1d1f */
+  --secondary-foreground: oklch(0.975 0.002 286);
+  --muted: oklch(0.23 0.005 286);
+  --muted-foreground: oklch(0.66 0.012 264);     /* #8a8f98 */
+  --accent: oklch(0.25 0.006 286);               /* #222326 hover row */
+  --accent-foreground: oklch(0.975 0.002 286);
+  --destructive: oklch(0.65 0.2 27);
+  --destructive-foreground: oklch(1 0 0);
+  --success: oklch(0.7 0.12 155);
+  --success-foreground: oklch(0.18 0.004 286);
+  --warning: oklch(0.78 0.13 75);
+  --warning-foreground: oklch(0.18 0.004 286);
+  --border: oklch(1 0 0 / 8%);                   /* hairline */
+  --input: oklch(1 0 0 / 10%);
+  --ring: oklch(0.6 0.13 277);
+  --chart-1: oklch(0.6 0.13 277);
+  --chart-2: oklch(0.7 0.11 277);
+  --chart-3: oklch(0.72 0.1 200);
+  --chart-4: oklch(0.78 0.14 75);
+  --chart-5: oklch(0.7 0.15 150);
+  --sidebar: oklch(0.145 0.004 286);              /* #0f1011 */
+  --sidebar-foreground: oklch(0.975 0.002 286);
+  --sidebar-primary: oklch(0.975 0.002 286);
+  --sidebar-primary-foreground: oklch(0.18 0.004 286);
+  --sidebar-accent: oklch(0.23 0.005 286);       /* #222326 active row */
+  --sidebar-accent-foreground: oklch(0.975 0.002 286);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.6 0.13 277);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    /* Inter's alternates Linear uses: single-storey a is off, but the
+       disambiguated l/I/1 (cv11) and the open digits (ss01) read better in
+       ids, model names and numbers. */
+    font-feature-settings: "cv11", "ss01";
+    text-rendering: optimizeLegibility;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply tracking-tight;
+  }
+  code,
+  kbd,
+  pre,
+  samp {
+    font-feature-settings: normal;
+  }
+}
+
+/* Typography plugin colours follow the theme tokens, in light and dark alike,
+   instead of the plugin's own gray scale, so assistant prose matches the rest
+   of the UI. Heading sizes are cut down for a chat column: the plugin's h1 is
+   2.25em, which turned a "# Summary" line in a reply into a page title. */
+.prose {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-lead: var(--muted-foreground);
+  --tw-prose-links: var(--foreground);
+  --tw-prose-bold: var(--foreground);
+  --tw-prose-counters: var(--muted-foreground);
+  --tw-prose-bullets: var(--muted-foreground);
+  --tw-prose-hr: var(--border);
+  --tw-prose-quotes: var(--muted-foreground);
+  --tw-prose-quote-borders: var(--border);
+  --tw-prose-captions: var(--muted-foreground);
+  --tw-prose-kbd: var(--foreground);
+  --tw-prose-code: var(--foreground);
+  --tw-prose-pre-code: var(--foreground);
+  --tw-prose-pre-bg: var(--muted);
+  --tw-prose-th-borders: var(--border);
+  --tw-prose-td-borders: var(--border);
+  --tw-prose-invert-body: var(--foreground);
+  --tw-prose-invert-headings: var(--foreground);
+  --tw-prose-invert-lead: var(--muted-foreground);
+  --tw-prose-invert-links: var(--foreground);
+  --tw-prose-invert-bold: var(--foreground);
+  --tw-prose-invert-counters: var(--muted-foreground);
+  --tw-prose-invert-bullets: var(--muted-foreground);
+  --tw-prose-invert-hr: var(--border);
+  --tw-prose-invert-quotes: var(--muted-foreground);
+  --tw-prose-invert-quote-borders: var(--border);
+  --tw-prose-invert-captions: var(--muted-foreground);
+  --tw-prose-invert-code: var(--foreground);
+  --tw-prose-invert-pre-code: var(--foreground);
+  --tw-prose-invert-pre-bg: var(--muted);
+  --tw-prose-invert-th-borders: var(--border);
+  --tw-prose-invert-td-borders: var(--border);
+}
+.prose :where(h1):not(:where([class~="not-prose"] *)) {
+  font-size: 1.5em;
+  margin-top: 1.25em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+}
+.prose :where(h2):not(:where([class~="not-prose"] *)) {
+  font-size: 1.25em;
+  margin-top: 1.25em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+}
+.prose :where(h3):not(:where([class~="not-prose"] *)) {
+  font-size: 1.0625em;
+  margin-top: 1.25em;
+  margin-bottom: 0.4em;
+  font-weight: 600;
+}
+.prose :where(a):not(:where([class~="not-prose"] *)) {
+  text-decoration-color: var(--border);
+  text-underline-offset: 3px;
+}
+.prose :where(a):not(:where([class~="not-prose"] *)):hover {
+  text-decoration-color: currentColor;
+}
+
+code {
+  font-family: var(--font-geist-mono);
+  font-feature-settings: var(--default-mono-font-feature-settings);
+  font-variation-settings: var(--default-mono-font-variation-settings);
+}
+
+/* sonner toast */
+[data-sonner-toaster] > li {
+  width: 100%;
+}
+
+/* Milkdown Crepe (canvas editor): its frame theme sets the --crepe-color-* vars
+   on .milkdown itself, which shadows anything set on a parent, so the app's
+   tokens have to be applied at the same selector. */
+.canvas-editor .milkdown {
+  --crepe-color-background: transparent;
+  --crepe-color-on-background: var(--foreground);
+  --crepe-color-surface: var(--muted);
+  --crepe-color-surface-low: var(--muted);
+  --crepe-color-on-surface: var(--foreground);
+  --crepe-color-on-surface-variant: var(--muted-foreground);
+  --crepe-color-outline: var(--border);
+  --crepe-color-primary: var(--foreground);
+  --crepe-color-secondary: var(--muted);
+  --crepe-color-on-secondary: var(--foreground);
+  --crepe-color-inverse: var(--foreground);
+  --crepe-color-on-inverse: var(--background);
+  --crepe-color-hover: var(--accent);
+  --crepe-color-selected: var(--accent);
+  --crepe-color-inline-area: var(--muted);
+  --crepe-font-title: inherit;
+  --crepe-font-default: inherit;
+  background: transparent;
+  color: var(--foreground);
+}
+.canvas-editor .milkdown .ProseMirror {
+  padding: 1rem 1.5rem 4rem;
+  max-width: none;
+}
+
+/* streamdown wraps tables and code blocks in bordered, padded boxes of its
+   own. The prose margins written for a bare <pre> / <table> then sit INSIDE
+   the box as dead space: 28px above every table, 21px above and below every
+   code block, measured at 390px on 2026-09-16. And prose puts literal
+   backticks around inline code via ::before/::after, on top of the chip
+   streamdown already draws, so `inline code` rendered with the ticks. */
+.prose [data-streamdown="code-block-body"] > pre,
+.prose [data-streamdown="table-wrapper"] table {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+.prose :where(code)::before,
+.prose :where(code)::after {
+  content: none;
+}
+
