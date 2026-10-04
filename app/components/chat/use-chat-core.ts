@@ -242,10 +242,13 @@ export function useChatCore({
     // Mid-send the URL moves to /c/<new id> before submit() has claimed the
     // chat; loading that chat's (empty) history here wiped the question.
     if (creatingChatRef.current) return
-    // The provider clears on chat change and reports isLoading until the
-    // load lands; apply the loaded history as is once it has finished.
+    // A chat switch clears the live list at once so the previous chat is not
+    // shown under the new URL; the loaded history is applied when it lands.
+    if (loadedChatIdRef.current !== chatId) {
+      loadedChatIdRef.current = chatId
+      setMessages([])
+    }
     if (isLoading) return
-    loadedChatIdRef.current = chatId
     setMessages(initialMessages)
     // `status` too: a load that lands mid-stream was skipped above and,
     // without re-running once the stream settles, never applied.
