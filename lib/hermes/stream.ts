@@ -1,36 +1,32 @@
 import { createUIMessageStream, type UIMessage, type UIMessageStreamWriter } from "ai"
 import { toolTimer, turnData } from "@/lib/turn"
 
-// Maps Hermes Agent's `/v1/responses` SSE (OpenAI Responses API shape) to the
-// AI SDK v5+ UI message stream protocol. Emits writer.write() chunks;
+// Maps the Hermes session chat SSE (`POST /api/sessions/{id}/chat/stream`) to
+// the AI SDK v5+ UI message stream protocol. Emits writer.write() chunks;
 // createUIMessageStream reconstructs the final assistant UIMessage (with
 // `.parts`) for onFinish persistence.
 //
-// Event names below are taken verbatim from Hermes 0.21.2
-// gateway/platforms/api_server_openai_routes.py (commit 939e45c):
-//   response.created                 (line 201) - ignored, no stream equivalent
-//   response.output_item.added       (lines 211, 240) -> tool-input-start (+ tool-input-delta)
-//   response.output_text.delta       (line 219) -> text-delta
-//   response.output_item.done        (lines 253, 266, 332) -> tool-input-available / tool-output-available
-//   response.output_text.done        (line 328) - ignored, redundant with deltas
-//   response.completed               (line 369) -> finish
-//   response.failed                  (lines 355, 374) -> error
+// Each frame is `event: <name>\ndata: <json>\n\n`; `: keepalive` comment
+// frames carry no data line and are skipped. Events:
+//   assistant.delta       {delta}                       -> text-delta
+//   tool.progress         {tool_name:"_thinking",delta} -> reasoning-delta
+//   tool.started          {tool_name,preview,args}      -> tool-input-start + tool-input-available
+//   tool.completed        {tool_name,preview}           -> tool-output-available
+//   tool.failed           {tool_name,preview}           -> tool-output-error
+//   assistant.commentary  {text,already_streamed}       -> own text part when not yet streamed
+//   assistant.completed   {content}                     -> authoritative final text
+//   run.completed|run.cancelled {usage}                 -> data-turn + finish
+//   run.failed|error      {message}                     -> error
+//   done                                                -> finish if nothing finished the stream yet
+// run.started, message.started and approval.request have no stream equivalent.
 //
-// `response.output_item.added` with item.type === "function_call" is sent when
-// the tool STARTS (emit_tool_started, line 224), before it runs; it carries
-// name, call_id and the arguments as a JSON string. Mapped to tool-input-start
-// so the running step shows at once, plus one tool-input-delta with the
-// arguments so its summary (command, path) shows too. The later `done` has the
-// same call_id, so tool-input-available updates that part rather than adding one.
-// Added items of type "message" / "function_call_output" are ignored.
+// Tool events carry no call id, so one is minted per tool.started and the
+// matching tool.completed / tool.failed (same tool_name, oldest first) closes it.
 //
-// `response.output_item.done` carries one `item`:
-//   item.type === "function_call" && item.status === "completed"      -> tool-input-available
-//   item.type === "function_call_output"                              -> tool-output-available
-//   item.type === "message"                                           -> ignored (text already streamed)
-//
-// Reasoning arrives as the standard reasoning_text / reasoning_summary_text
-// deltas and is mapped by writeReasoningDelta below.
+// assistant.completed resolves media tags to data URLs, so its `content` can
+// differ from the streamed deltas. The stream protocol cannot rewrite text
+// already sent: when the streamed text is a prefix of `content` the rest is
+// appended, otherwise `content` follows as a separate final text part.
 
 type HermesStreamOpts = {
   onFinish?: (payload: { message: UIMessage }) => void | Promise<void>
@@ -45,23 +41,29 @@ function parseJsonOr<T>(text: string, fallback: (raw: string) => T): T {
 }
 
 const TEXT_ID = "hermes-text"
+const THINKING = "_thinking"
 
-async function writeHermesResponses(
+async function writeHermesSession(
   sse: ReadableStream<Uint8Array>,
   writer: UIMessageStreamWriter
 ): Promise<void> {
   const decoder = new TextDecoder()
   let textOpen = false
+  // Text streamed into the currently open part, compared with the final content.
+  let segment = ""
+  let finished = false
+  let extraParts = 0
   const startedAt = Date.now()
-  // Per-tool wall clock: from output_item.added (tool started) to its
-  // function_call_output (tool finished).
+  // Per-tool wall clock: from tool.started to its tool.completed / tool.failed.
   const timer = toolTimer()
+  // Minted call ids of tools still running, per tool_name, oldest first.
+  const running = new Map<string, string[]>()
+  let toolCount = 0
 
   writer.write({ type: "start" })
 
-  // Live reasoning from the standard Responses events goes through
-  // writeReasoningDelta, which gives each thinking block its own part and
-  // closes it as soon as text or a tool call follows.
+  // Each thinking block gets its own part and closes as soon as text or a tool
+  // call follows.
   let reasoningId: string | null = null
   let reasoningCount = 0
   const closeReasoningIfOpen = () => {
@@ -70,32 +72,77 @@ async function writeHermesResponses(
       reasoningId = null
     }
   }
-  const writeReasoningDelta = (delta: string) => {
-    if (!delta) return
-    if (textOpen) {
-      writer.write({ type: "text-end", id: TEXT_ID })
-      textOpen = false
-    }
-    if (!reasoningId) {
-      reasoningId = `hermes-reasoning-${reasoningCount++}`
-      writer.write({ type: "reasoning-start", id: reasoningId })
-    }
-    writer.write({ type: "reasoning-delta", id: reasoningId, delta })
-  }
-
   const closeTextIfOpen = () => {
     closeReasoningIfOpen()
     if (textOpen) {
       writer.write({ type: "text-end", id: TEXT_ID })
       textOpen = false
     }
+    segment = ""
+  }
+  const writeReasoningDelta = (delta: string) => {
+    if (!delta) return
+    if (textOpen) closeTextIfOpen()
+    if (!reasoningId) {
+      reasoningId = `hermes-reasoning-${reasoningCount++}`
+      writer.write({ type: "reasoning-start", id: reasoningId })
+    }
+    writer.write({ type: "reasoning-delta", id: reasoningId, delta })
+  }
+  const writeTextDelta = (delta: string) => {
+    if (!delta) return
+    closeReasoningIfOpen()
+    if (!textOpen) {
+      writer.write({ type: "text-start", id: TEXT_ID })
+      textOpen = true
+    }
+    segment += delta
+    writer.write({ type: "text-delta", id: TEXT_ID, delta })
+  }
+  const writeTextPart = (text: string) => {
+    const id = `hermes-text-extra-${extraParts++}`
+    writer.write({ type: "text-start", id })
+    writer.write({ type: "text-delta", id, delta: text })
+    writer.write({ type: "text-end", id })
+  }
+  const finish = (usage?: Record<string, number>) => {
+    if (finished) return
+    finished = true
+    closeTextIfOpen()
+    writer.write({
+      type: "data-turn",
+      id: "turn",
+      data: turnData(
+        startedAt,
+        {
+          inputTokens: usage?.input_tokens,
+          outputTokens: usage?.output_tokens,
+          totalTokens: usage?.total_tokens,
+        },
+        timer.tools
+      ),
+    })
+    writer.write({ type: "finish" })
+  }
+  const fail = (message: string) => {
+    if (finished) return
+    finished = true
+    closeTextIfOpen()
+    writer.write({ type: "error", errorText: message || "Hermes agent request failed" })
+  }
+  const endTool = (toolName: string): string | undefined => {
+    const id = running.get(toolName)?.shift()
+    if (id) timer.end(id)
+    return id
   }
 
   const handleFrame = (frame: string) => {
-    const dataLine = frame.split("\n").find((line) => line.startsWith("data:"))
-    if (!dataLine) return
+    const lines = frame.split("\n")
+    const event = lines.find((l) => l.startsWith("event:"))?.slice(6).trim()
+    const dataLine = lines.find((l) => l.startsWith("data:"))
+    if (!event || !dataLine) return
     const raw = dataLine.slice(5).trim()
-    if (!raw || raw === "[DONE]") return
+    if (!raw) return
 
     let data: Record<string, unknown>
     try {
@@ -103,91 +150,89 @@ async function writeHermesResponses(
     } catch {
       return
     }
+    const str = (v: unknown) => (typeof v === "string" ? v : "")
 
-    switch (data.type as string) {
-      case "response.output_text.delta": {
-        if (typeof data.delta === "string") {
-          closeReasoningIfOpen()
-          if (!textOpen) {
-            writer.write({ type: "text-start", id: TEXT_ID })
-            textOpen = true
-          }
-          writer.write({ type: "text-delta", id: TEXT_ID, delta: data.delta })
-        }
+    switch (event) {
+      case "assistant.delta": {
+        writeTextDelta(str(data.delta))
         break
       }
-      // Native reasoning: the gateway streams summary deltas on this SSE.
-      case "response.reasoning_text.delta":
-      case "response.reasoning_summary_text.delta": {
-        if (typeof data.delta === "string") writeReasoningDelta(data.delta)
+      case "tool.progress": {
+        if (data.tool_name === THINKING) writeReasoningDelta(str(data.delta))
         break
       }
-      case "response.output_item.added": {
-        const item = data.item as Record<string, unknown> | undefined
-        if (item?.type !== "function_call" || !item.call_id) break
+      case "tool.started": {
         closeTextIfOpen()
-        const toolCallId = String(item.call_id)
+        const toolName = str(data.tool_name)
+        const toolCallId = `hermes-tool-${toolCount++}`
+        running.set(toolName, [...(running.get(toolName) ?? []), toolCallId])
         timer.start(toolCallId)
-        writer.write({ type: "tool-input-start", toolCallId, toolName: String(item.name) })
-        if (typeof item.arguments === "string" && item.arguments) {
-          writer.write({ type: "tool-input-delta", toolCallId, inputTextDelta: item.arguments })
-        }
-        break
-      }
-      case "response.output_item.done": {
-        const item = data.item as Record<string, unknown> | undefined
-        if (!item) break
-        if (item.type === "function_call" && item.status === "completed") {
-          closeTextIfOpen()
-          const input = parseJsonOr(String(item.arguments ?? "{}"), (r) => ({
-            raw: r,
-          }))
-          writer.write({
-            type: "tool-input-available",
-            toolCallId: String(item.call_id),
-            toolName: String(item.name),
-            input,
-          })
-        } else if (item.type === "function_call_output") {
-          closeTextIfOpen()
-          const output = item.output as Array<{ text?: string }> | undefined
-          const text = output?.[0]?.text ?? ""
-          const result = parseJsonOr<unknown>(text, (r) => r)
-          timer.end(String(item.call_id))
-          writer.write({
-            type: "tool-output-available",
-            toolCallId: String(item.call_id),
-            output: result,
-          })
-        }
-        break
-      }
-      case "response.completed": {
-        closeTextIfOpen()
-        const usage = (data.response as { usage?: Record<string, number> } | undefined)
-          ?.usage
+        writer.write({ type: "tool-input-start", toolCallId, toolName })
         writer.write({
-          type: "data-turn",
-          id: "turn",
-          data: turnData(startedAt, {
-            inputTokens: usage?.input_tokens,
-            outputTokens: usage?.output_tokens,
-            totalTokens: usage?.total_tokens,
-          }, timer.tools),
+          type: "tool-input-available",
+          toolCallId,
+          toolName,
+          input: data.args ?? {},
         })
-        writer.write({ type: "finish" })
         break
       }
-      case "response.failed": {
+      case "tool.completed": {
         closeTextIfOpen()
-        const response = data.response as Record<string, unknown> | undefined
-        const error = response?.error
-        const message =
+        const toolCallId = endTool(str(data.tool_name))
+        if (!toolCallId) break
+        writer.write({
+          type: "tool-output-available",
+          toolCallId,
+          output: parseJsonOr<unknown>(str(data.preview), (r) => r),
+        })
+        break
+      }
+      case "tool.failed": {
+        closeTextIfOpen()
+        const toolCallId = endTool(str(data.tool_name))
+        if (!toolCallId) break
+        writer.write({
+          type: "tool-output-error",
+          toolCallId,
+          errorText: str(data.preview) || "Tool failed",
+        })
+        break
+      }
+      case "assistant.commentary": {
+        if (data.already_streamed === false && str(data.text)) {
+          closeTextIfOpen()
+          writeTextPart(str(data.text))
+        }
+        break
+      }
+      case "assistant.completed": {
+        const content = str(data.content)
+        if (!content || content === segment) break
+        if (content.startsWith(segment)) {
+          writeTextDelta(content.slice(segment.length))
+        } else {
+          closeTextIfOpen()
+          writeTextPart(content)
+        }
+        break
+      }
+      case "run.completed":
+      case "run.cancelled": {
+        finish(data.usage as Record<string, number> | undefined)
+        break
+      }
+      case "run.failed":
+      case "error": {
+        const error = data.error ?? data.message
+        fail(
           typeof error === "string"
             ? error
-            : (error as { message?: string })?.message ||
-              "Hermes agent request failed"
-        writer.write({ type: "error", errorText: message })
+            : ((error as { message?: string } | undefined)?.message ?? "")
+        )
+        break
+      }
+      case "done": {
+        finish()
         break
       }
       default:
@@ -216,11 +261,10 @@ async function writeHermesResponses(
       type: "error",
       errorText: err instanceof Error ? err.message : String(err),
     })
-  } finally {
   }
 }
 
-export function hermesResponsesToUIMessageStream(
+export function hermesSessionStreamToUIMessageStream(
   sse: ReadableStream<Uint8Array>,
   opts: HermesStreamOpts = {}
 ) {
@@ -234,7 +278,7 @@ export function hermesResponsesToUIMessageStream(
   // the inner read loop is never starved.
   const inner = createUIMessageStream({
     execute: async ({ writer }) => {
-      await writeHermesResponses(sse, writer)
+      await writeHermesSession(sse, writer)
     },
     onFinish: async ({ responseMessage }) => {
       try {

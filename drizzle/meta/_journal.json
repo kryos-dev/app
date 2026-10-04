@@ -113,6 +113,13 @@
       "when": 1790102400000,
       "tag": "0015_answers_behind_interim_rows",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1790188800000,
+      "tag": "0016_hermes_session_per_chat",
+      "breakpoints": true
     }
   ]
 }

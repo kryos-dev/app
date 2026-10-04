@@ -2,7 +2,7 @@ import { LinkMarkdown } from "@/app/components/chat/link-markdown"
 import { cn } from "@/lib/utils"
 import { marked } from "marked"
 import { memo, useId, useMemo } from "react"
-import ReactMarkdown, { Components } from "react-markdown"
+import ReactMarkdown, { Components, defaultUrlTransform } from "react-markdown"
 import remarkBreaks from "remark-breaks"
 import remarkGfm from "remark-gfm"
 import { ButtonCopy } from "../common/button-copy"
@@ -18,6 +18,11 @@ export type MarkdownProps = {
   className?: string
   components?: Partial<Components>
 }
+
+// The default transform drops data: URLs; inline images from the agent arrive
+// as data:image/ URLs and must render.
+const urlTransform = (url: string) =>
+  url.startsWith("data:image/") ? url : defaultUrlTransform(url)
 
 function parseMarkdownIntoBlocks(markdown: string): string[] {
   const tokens = marked.lexer(markdown)
@@ -94,6 +99,7 @@ const MemoizedMarkdownBlock = memo(
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks]}
         components={components}
+        urlTransform={urlTransform}
       >
         {content}
       </ReactMarkdown>

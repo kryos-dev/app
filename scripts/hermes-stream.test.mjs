@@ -1,211 +1,161 @@
-// Feeds a hand-written Hermes /v1/responses SSE sample through the mapper
-// and asserts the UI message stream chunks it produces. Run with:
+// Feeds hand-written Hermes session chat SSE samples through the mapper and
+// asserts the UI message stream chunks and the reconstructed message. Run with:
 //   npx tsx scripts/hermes-stream.test.mjs
 import assert from "node:assert/strict"
-import { hermesResponsesToUIMessageStream } from "../lib/hermes/stream.ts"
-
-const events = [
-  { type: "response.created" },
-  { type: "response.output_text.delta", delta: "Hel" },
-  { type: "response.output_text.delta", delta: "lo" },
-  {
-    type: "response.output_item.done",
-    item: {
-      type: "function_call",
-      status: "completed",
-      call_id: "call_1",
-      name: "terminal",
-      arguments: JSON.stringify({ command: "echo hi" }),
-    },
-  },
-  {
-    type: "response.output_item.done",
-    item: {
-      type: "function_call_output",
-      call_id: "call_1",
-      output: [{ text: JSON.stringify({ output: "hi" }) }],
-    },
-  },
-  {
-    type: "response.completed",
-    response: { usage: { input_tokens: 10, output_tokens: 2 } },
-  },
-]
-
-const sseText = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("") + "data: [DONE]\n\n"
+import { hermesSessionStreamToUIMessageStream } from "../lib/hermes/stream.ts"
 
 const encoder = new TextEncoder()
-const sourceStream = new ReadableStream({
-  start(controller) {
-    const bytes = encoder.encode(sseText)
-    const mid = Math.floor(bytes.length / 2)
-    controller.enqueue(bytes.slice(0, mid))
-    controller.enqueue(bytes.slice(mid))
-    controller.close()
-  },
-})
+const frames = (evs) =>
+  evs.map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`).join("")
 
-let finishedMessage
-const uiStream = hermesResponsesToUIMessageStream(sourceStream, {
-  onFinish: ({ message }) => {
-    finishedMessage = message
-  },
-})
-
-const reader = uiStream.getReader()
-const chunks = []
-for (;;) {
-  const { done, value } = await reader.read()
-  if (done) break
-  chunks.push(value)
-}
-
-console.log(JSON.stringify(chunks, null, 2))
-
-const types = chunks.map((c) => c.type)
-assert.ok(types.includes("start"), "expected a start chunk")
-
-const textDeltas = chunks.filter((c) => c.type === "text-delta")
-assert.equal(
-  textDeltas.map((c) => c.delta).join(""),
-  "Hello",
-  "expected text deltas to reassemble to 'Hello'"
-)
-
-const toolInputChunk = chunks.find((c) => c.type === "tool-input-available")
-assert.ok(toolInputChunk, "expected a tool-input-available chunk")
-assert.equal(toolInputChunk.toolCallId, "call_1")
-assert.equal(toolInputChunk.toolName, "terminal")
-assert.deepEqual(toolInputChunk.input, { command: "echo hi" })
-
-const toolOutputChunk = chunks.find((c) => c.type === "tool-output-available")
-assert.ok(toolOutputChunk, "expected a tool-output-available chunk")
-assert.equal(toolOutputChunk.toolCallId, "call_1")
-assert.deepEqual(toolOutputChunk.output, { output: "hi" })
-
-assert.ok(types.includes("finish"), "expected a finish chunk")
-
-assert.ok(finishedMessage, "expected onFinish to receive the reconstructed message")
-const finishedText = finishedMessage.parts
-  .filter((p) => p.type === "text")
-  .map((p) => p.text)
-  .join("")
-assert.equal(finishedText, "Hello")
-const finishedToolPart = finishedMessage.parts.find(
-  (p) => p.type === "tool-terminal"
-)
-assert.ok(finishedToolPart, "expected a tool-terminal part on the reconstructed message")
-assert.equal(finishedToolPart.state, "output-available")
-
-// --- Cancellation: simulates a browser refresh mid-stream. The HTTP
-// consumer cancels the output reader after only the first chunk, but
-// onFinish must still receive the full accumulated text once the upstream
-// SSE finishes draining in the background. ---
-{
-  const sourceStream2 = new ReadableStream({
+async function run(sseText, { split = false } = {}) {
+  const bytes = encoder.encode(sseText)
+  const source = new ReadableStream({
     start(controller) {
-      controller.enqueue(encoder.encode(sseText))
+      if (split) {
+        const mid = Math.floor(bytes.length / 2)
+        controller.enqueue(bytes.slice(0, mid))
+        controller.enqueue(bytes.slice(mid))
+      } else controller.enqueue(bytes)
       controller.close()
     },
   })
+  let message
+  const reader = hermesSessionStreamToUIMessageStream(source, {
+    onFinish: ({ message: m }) => (message = m),
+  }).getReader()
+  const chunks = []
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+  }
+  return { chunks, message, types: chunks.map((c) => c.type) }
+}
 
-  let finishedMessage2
-  let resolveFinished
-  const finished2 = new Promise((resolve) => {
-    resolveFinished = resolve
-  })
-  const uiStream2 = hermesResponsesToUIMessageStream(sourceStream2, {
-    onFinish: ({ message }) => {
-      finishedMessage2 = message
-      resolveFinished()
-    },
-  })
-
-  const reader2 = uiStream2.getReader()
-  await reader2.read() // consume only the first chunk
-  await reader2.cancel() // simulate the client disconnecting
-
-  await Promise.race([
-    finished2,
-    new Promise((_, reject) =>
-      setTimeout(
-        () => reject(new Error("onFinish did not fire after cancel")),
-        2000
-      )
-    ),
-  ])
-
-  const finishedText2 = finishedMessage2.parts
+const textOf = (message) =>
+  message.parts
     .filter((p) => p.type === "text")
     .map((p) => p.text)
     .join("")
+
+// --- Reasoning, text, a tool that succeeds and one that fails, usage. ---
+{
+  const sse =
+    ": keepalive\n\n" +
+    frames([
+      ["run.started", {}],
+      ["message.started", {}],
+      ["tool.progress", { tool_name: "_thinking", delta: "hmm" }],
+      ["tool.started", { tool_name: "terminal", preview: "echo hi", args: { command: "echo hi" } }],
+      ["tool.completed", { tool_name: "terminal", preview: JSON.stringify({ output: "hi" }) }],
+      ["tool.started", { tool_name: "read_file", preview: "x", args: { path: "x" } }],
+      ["tool.failed", { tool_name: "read_file", preview: "no such file" }],
+      ["assistant.delta", { message_id: "m", delta: "Hel" }],
+      ["assistant.delta", { message_id: "m", delta: "lo" }],
+      ["assistant.completed", { content: "Hello" }],
+      ["run.completed", { usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } }],
+      ["done", {}],
+    ])
+  const { chunks, message, types } = await run(sse, { split: true })
+
+  assert.equal(chunks.filter((c) => c.type === "text-delta").map((c) => c.delta).join(""), "Hello")
   assert.equal(
-    finishedText2,
-    "Hello",
-    "expected onFinish to receive full text even after the reader was cancelled early"
+    chunks.filter((c) => c.type === "reasoning-delta").map((c) => c.delta).join(""),
+    "hmm"
   )
+  assert.equal(types.filter((t) => t === "finish").length, 1, "done must not finish twice")
+  assert.equal(textOf(message), "Hello")
+
+  const term = message.parts.find((p) => p.type === "tool-terminal")
+  assert.equal(term.state, "output-available")
+  assert.deepEqual(term.input, { command: "echo hi" })
+  assert.deepEqual(term.output, { output: "hi" })
+  const failed = message.parts.find((p) => p.type === "tool-read_file")
+  assert.equal(failed.state, "output-error")
+  assert.equal(failed.errorText, "no such file")
+
+  const turn = message.parts.find((p) => p.type === "data-turn").data
+  assert.equal(turn.usage.inputTokens, 10)
+  assert.equal(typeof turn.tools?.[term.toolCallId], "number", "expected a per-tool duration")
 }
 
-// --- Tool start (response.output_item.added, sent before the tool runs):
-// becomes tool-input-start right away, and the later output_item.done with the
-// same call_id updates that part instead of adding a second one. ---
+// --- assistant.completed: appended when the streamed text is a prefix, a
+// separate part when it differs, and the only text when nothing streamed. ---
 {
-  const call = { type: "function_call", call_id: "call_9", name: "terminal", arguments: JSON.stringify({ command: "ls" }) }
-  const started = [
-    { type: "response.output_text.delta", delta: "Looking." },
-    { type: "response.output_item.added", item: { type: "message", status: "in_progress", content: [] } },
-    { type: "response.output_item.added", item: { ...call, status: "in_progress" } },
-  ]
-  const finished = [
-    { type: "response.output_item.done", item: { ...call, status: "completed" } },
-    { type: "response.output_item.added", item: { type: "function_call_output", call_id: "call_9", output: [{ text: "a b" }] } },
-    { type: "response.output_item.done", item: { type: "function_call_output", call_id: "call_9", output: [{ text: "a b" }] } },
-    { type: "response.completed", response: {} },
-  ]
-  const frames = (evs) => encoder.encode(evs.map((e) => `data: ${JSON.stringify(e)}\n\n`).join(""))
-  let release
-  const toolRan = new Promise((r) => (release = r))
-  let message4
-  const uiStream4 = hermesResponsesToUIMessageStream(
-    new ReadableStream({
-      async start(controller) {
-        controller.enqueue(frames(started))
-        await toolRan // the tool is "running" until the test has seen its start
-        controller.enqueue(frames(finished))
-        controller.close()
-      },
-    }),
-    { onFinish: ({ message }) => (message4 = message) }
+  const done = [["run.completed", {}], ["done", {}]]
+  const prefix = await run(
+    frames([["assistant.delta", { delta: "See " }], ["assistant.completed", { content: "See ![i](data:image/png;base64,AA)" }], ...done])
   )
-  const reader4 = uiStream4.getReader()
-  const seen = []
-  for (;;) {
-    const { done, value } = await reader4.read()
-    if (done) break
-    seen.push(value)
-    if (value.type === "tool-input-delta") release()
+  assert.equal(textOf(prefix.message), "See ![i](data:image/png;base64,AA)")
+
+  const none = await run(frames([["assistant.completed", { content: "Only" }], ...done]))
+  assert.equal(textOf(none.message), "Only")
+
+  const differs = await run(
+    frames([["assistant.delta", { delta: "MEDIA:/a.png" }], ["assistant.completed", { content: "![i](data:image/png;base64,AA)" }], ...done])
+  )
+  assert.ok(textOf(differs.message).endsWith("![i](data:image/png;base64,AA)"))
+}
+
+// --- Commentary is text only when it was not already streamed. ---
+{
+  const { message } = await run(
+    frames([
+      ["assistant.commentary", { text: "skipped", already_streamed: true }],
+      ["assistant.commentary", { text: "Working on it.", already_streamed: false }],
+      ["run.completed", {}],
+      ["done", {}],
+    ])
+  )
+  assert.equal(textOf(message), "Working on it.")
+}
+
+// --- Failures surface as an error chunk and never as finish. ---
+{
+  for (const failure of [
+    ["run.failed", { error: "boom" }],
+    ["error", { message: "boom" }],
+  ]) {
+    const { chunks, types } = await run(frames([failure, ["done", {}]]))
+    assert.equal(chunks.find((c) => c.type === "error").errorText, "boom")
+    assert.ok(!types.includes("finish"))
   }
-  const types4 = seen.map((c) => c.type)
-  const startIdx = types4.indexOf("tool-input-start")
-  assert.ok(startIdx !== -1, "expected output_item.added to map to tool-input-start")
-  assert.ok(types4.indexOf("text-end") < startIdx, "expected the text to be closed before the tool starts")
-  assert.deepEqual(
-    seen.slice(startIdx, startIdx + 2),
-    [
-      { type: "tool-input-start", toolCallId: "call_9", toolName: "terminal" },
-      { type: "tool-input-delta", toolCallId: "call_9", inputTextDelta: call.arguments },
-    ],
-    "expected tool-input-start then the arguments as one delta"
-  )
-  assert.equal(types4.filter((t) => t === "tool-input-start").length, 1, "message/output added items are ignored")
-  assert.ok(startIdx < types4.indexOf("tool-input-available"), "expected start before input-available")
-  assert.equal(seen.find((c) => c.type === "tool-input-available").toolCallId, "call_9")
-  const toolParts = message4.parts.filter((p) => p.type === "tool-terminal")
-  assert.equal(toolParts.length, 1, "expected one tool part, not a duplicate")
-  assert.equal(toolParts[0].state, "output-available")
-  assert.deepEqual(toolParts[0].input, { command: "ls" })
-  const turn = message4.parts.find((p) => p.type === "data-turn").data
-  assert.equal(typeof turn.tools?.call_9, "number", "expected a per-tool duration")
+}
+
+// --- Cancellation: the consumer drops after one chunk, yet onFinish must
+// still receive the full text once the upstream drains. ---
+{
+  const source = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(
+          frames([
+            ["assistant.delta", { delta: "Hello" }],
+            ["run.completed", {}],
+            ["done", {}],
+          ])
+        )
+      )
+      controller.close()
+    },
+  })
+  let resolveFinished
+  const finished = new Promise((r) => (resolveFinished = r))
+  let message
+  const reader = hermesSessionStreamToUIMessageStream(source, {
+    onFinish: ({ message: m }) => {
+      message = m
+      resolveFinished()
+    },
+  }).getReader()
+  await reader.read()
+  await reader.cancel()
+  await Promise.race([
+    finished,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("onFinish did not fire after cancel")), 2000)),
+  ])
+  assert.equal(textOf(message), "Hello")
 }
 
 console.log("hermes-stream.test.mjs: all assertions passed")

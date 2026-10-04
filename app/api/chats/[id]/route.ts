@@ -1,5 +1,6 @@
 import { getCurrentUser } from "@/lib/auth"
 import { db, schema } from "@/lib/db"
+import { deleteHermesSession } from "@/lib/hermes/client"
 import { and, eq } from "drizzle-orm"
 import { NextResponse } from "next/server"
 import { toChatDTO } from "../utils"
@@ -80,9 +81,12 @@ export async function DELETE(
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const { id } = await params
-  await db
+  const [deleted] = await db
     .delete(schema.chats)
     .where(and(eq(schema.chats.id, id), eq(schema.chats.userId, user.id)))
+    .returning({ hermesSessionId: schema.chats.hermesSessionId })
+
+  if (deleted?.hermesSessionId) await deleteHermesSession(deleted.hermesSessionId)
 
   return NextResponse.json({ success: true })
 }

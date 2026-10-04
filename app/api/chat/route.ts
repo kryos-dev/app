@@ -4,8 +4,8 @@ import { maybeGenerateTitle } from "@/lib/title"
 import { SYSTEM_PROMPT_DEFAULT } from "@/lib/config"
 import type { Attachment } from "@/lib/file-handling"
 import { projectContext } from "@/lib/projects/context"
-import { hermesRequest } from "@/lib/hermes/client"
-import { hermesResponsesToUIMessageStream } from "@/lib/hermes/stream"
+import { ensureHermesSession, hermesRequest } from "@/lib/hermes/client"
+import { hermesSessionStreamToUIMessageStream } from "@/lib/hermes/stream"
 import { beginRun, endRun, type Run } from "@/lib/runs"
 import { THINKING_EFFORTS, THINKING_EFFORT_DEFAULT } from "@/lib/thinking-effort"
 import { getCurrentUser } from "@/lib/auth"
@@ -257,11 +257,13 @@ ${canvasSystemPromptAddendum(canvasId ? canvasTitle : undefined)}`
     // left the chat unable to answer anything at all).
     const run = beginRun(chatId)
 
-    // The whole chat is sent because the gateway's Responses endpoint keeps no history of its own.
+    // The chat's Hermes session holds the conversation, so only the newest
+    // message is sent.
     const hermesRes = await hermesRequest({
-      messages,
+      message: userMessage,
       model,
       chatId,
+      sessionId: await ensureHermesSession(chatId),
       systemPrompt: effectiveSystemPrompt,
       reasoningEffort: effort,
       // What makes Stop mean stop: aborting this cancels the request to
@@ -273,7 +275,7 @@ ${canvasSystemPromptAddendum(canvasId ? canvasTitle : undefined)}`
       throw err
     })
 
-    const stream = hermesResponsesToUIMessageStream(
+    const stream = hermesSessionStreamToUIMessageStream(
       hermesRes.body as ReadableStream<Uint8Array>,
       {
         onFinish: async ({ message }) =>

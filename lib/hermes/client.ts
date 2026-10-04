@@ -1,4 +1,6 @@
 import { readBlob } from "@/lib/blobs"
+import { db, schema } from "@/lib/db"
+import { eq } from "drizzle-orm"
 import type { UIMessage } from "ai"
 
 /** The virtual model id meaning "whatever the agent is configured with". */
@@ -37,12 +39,11 @@ function textOf(message: UIMessage): string {
     .join("")
 }
 
-// The new user turn as Responses input. Images are inlined as data URLs (the
-// endpoint accepts only text and image parts); any other file is named in the
-// text by its path on the Hermes host so the agent opens it with its own tools.
-async function userTurnInput(
-  message: UIMessage
-): Promise<string | [{ role: "user"; content: InputPart[] }]> {
+// The new user turn as session chat input. Images are inlined as data URLs
+// (the endpoint accepts only text and image parts); any other file is named in
+// the text by its path on the Hermes host so the agent opens it with its own
+// tools.
+async function userTurnInput(message: UIMessage): Promise<string | InputPart[]> {
   let text = textOf(message)
   const images: InputPart[] = []
   const hostDir = (process.env.BLOB_HOST_DIR ?? "").replace(/\/+$/, "")
@@ -70,67 +71,114 @@ async function userTurnInput(
   }
 
   if (!images.length) return text
-  return [
-    {
-      role: "user",
-      content: [...(text ? [{ type: "input_text" as const, text }] : []), ...images],
-    },
-  ]
+  return [...(text ? [{ type: "input_text" as const, text }] : []), ...images]
+}
+
+function hermesHeaders(extra?: Record<string, string>): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${process.env.HERMES_API_KEY}`,
+    ...extra,
+  }
+}
+
+async function createHermesSession(
+  chatId: string,
+  title?: string
+): Promise<string> {
+  const res = await fetch(`${process.env.HERMES_API_URL}/api/sessions`, {
+    method: "POST",
+    headers: hermesHeaders(),
+    body: JSON.stringify(title ? { title } : {}),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`Hermes session create failed (${res.status}): ${text}`)
+  }
+  const id = ((await res.json()) as { session?: { id?: string } }).session?.id
+  if (!id) throw new Error("Hermes session create returned no id")
+  await db
+    .update(schema.chats)
+    .set({ hermesSessionId: id })
+    .where(eq(schema.chats.id, chatId))
+  return id
+}
+
+/**
+ * The Hermes session that holds this chat's conversation, created on first
+ * use and stored on the chat row.
+ */
+export async function ensureHermesSession(
+  chatId: string,
+  title?: string
+): Promise<string> {
+  const [row] = await db
+    .select({ id: schema.chats.hermesSessionId })
+    .from(schema.chats)
+    .where(eq(schema.chats.id, chatId))
+  return row?.id ?? createHermesSession(chatId, title)
+}
+
+/** Best-effort removal of a chat's Hermes session; failures are ignored. */
+export async function deleteHermesSession(sessionId: string): Promise<void> {
+  await fetch(
+    `${process.env.HERMES_API_URL}/api/sessions/${encodeURIComponent(sessionId)}`,
+    { method: "DELETE", headers: hermesHeaders() }
+  ).catch(() => {})
 }
 
 type HermesRequestArgs = {
-  /** Every turn of the chat in order; the last one is the new user message. */
-  messages: UIMessage[]
+  /** The newest user message; earlier turns live in the Hermes session. */
+  message: UIMessage
   /** Zola model id; "hermes-agent" or empty means the agent's own default. */
   model?: string
   chatId: string
+  sessionId: string
   systemPrompt?: string
   /** none | low | medium | high | max, see lib/thinking-effort.ts */
   reasoningEffort: string
   signal?: AbortSignal
 }
 
-// POSTs to the gateway's `/v1/responses` (stream: true) and returns the raw
-// Response for hermesResponsesToUIMessageStream. `/v1/responses` is stateless:
-// earlier turns travel as text in `input`, and the session key (the chat id)
-// only scopes the agent's memory.
+// POSTs the new turn to the session's `/chat/stream` and returns the raw
+// Response for hermesSessionStreamToUIMessageStream. The session keeps the
+// conversation (attachments included) and compacts it server-side, so only the
+// newest message travels; the session key (the chat id) scopes the agent's
+// memory. A session that no longer exists on the Hermes side (404) is replaced
+// by a new one, stored on the chat, and the turn is retried once.
 export async function hermesRequest({
-  messages,
+  message,
   model,
   chatId,
+  sessionId,
   systemPrompt,
   reasoningEffort,
   signal,
 }: HermesRequestArgs): Promise<Response> {
   const picked = decodeModelId(model)
-  const prior = messages
-    .slice(0, -1)
-    .filter((m) => m.role === "user" || m.role === "assistant")
-    .map((m) => ({ role: m.role, content: textOf(m) }))
-    .filter((m) => m.content)
-  const last = await userTurnInput(messages[messages.length - 1])
-  const input = [
-    ...prior,
-    ...(typeof last === "string" ? [{ role: "user" as const, content: last }] : last),
-  ]
-  const res = await fetch(`${process.env.HERMES_API_URL}/v1/responses`, {
-    method: "POST",
-    signal,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.HERMES_API_KEY}`,
-      "X-Hermes-Session-Key": chatId,
-    },
-    body: JSON.stringify({
-      stream: true,
-      instructions: systemPrompt,
-      input,
-      model_options: { reasoning_effort: reasoningEffort },
-      // An explicit provider is always honored by the gateway; a bare model
-      // would be dropped.
-      ...(picked ? { model: picked.model, provider: picked.provider } : {}),
-    }),
+  const body = JSON.stringify({
+    message: await userTurnInput(message),
+    instructions: systemPrompt,
+    model_options: { reasoning_effort: reasoningEffort },
+    // An explicit provider is always honored by the gateway; a bare model
+    // would be dropped.
+    ...(picked ? { model: picked.model, provider: picked.provider } : {}),
   })
+  const post = (id: string) =>
+    fetch(
+      `${process.env.HERMES_API_URL}/api/sessions/${encodeURIComponent(id)}/chat/stream`,
+      {
+        method: "POST",
+        signal,
+        headers: hermesHeaders({ "X-Hermes-Session-Key": chatId }),
+        body,
+      }
+    )
+
+  let res = await post(sessionId)
+  if (res.status === 404) {
+    res = await post(await createHermesSession(chatId))
+  }
 
   if (!res.ok || !res.body) {
     const text = await res.text().catch(() => "")

@@ -89,6 +89,8 @@ export const chats = pgTable(
     // starts, cleared when it is persisted. A client returning to the chat asks
     // GET /api/chat/[chatId]/stream, which reads this and re-attaches.
     activeStreamId: text("active_stream_id"),
+    // The Hermes session that holds this chat's conversation server-side.
+    hermesSessionId: text("hermes_session_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
