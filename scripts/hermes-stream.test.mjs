@@ -78,6 +78,21 @@ const textOf = (message) =>
   assert.equal(typeof turn.tools?.[term.toolCallId], "number", "expected a per-tool duration")
 }
 
+// --- Text before a tool call must not be duplicated by assistant.completed. ---
+{
+  const { message } = await run(
+    frames([
+      ["assistant.delta", { delta: "I checked the docs. " }],
+      ["tool.started", { tool_name: "terminal", args: { command: "cat docs" } }],
+      ["tool.completed", { tool_name: "terminal", preview: "done" }],
+      ["assistant.delta", { delta: "The answer is 42." }],
+      ["assistant.completed", { content: "I checked the docs. The answer is 42." }],
+      ["run.completed", {}],
+    ])
+  )
+  assert.equal(textOf(message), "I checked the docs. The answer is 42.")
+}
+
 // --- assistant.completed: appended when the streamed text is a prefix, a
 // separate part when it differs, and the only text when nothing streamed. ---
 {
