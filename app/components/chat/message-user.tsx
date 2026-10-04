@@ -24,6 +24,7 @@ import { Check, Copy } from "@phosphor-icons/react"
 import type { UIMessage } from "ai"
 import Image from "next/image"
 import React from "react"
+import { useCopy } from "./utils"
 
 const getTextFromDataUrl = (dataUrl: string) => {
   const base64 = dataUrl.split(",")[1]
@@ -33,19 +34,18 @@ const getTextFromDataUrl = (dataUrl: string) => {
 export type MessageUserProps = {
   hasScrollAnchor?: boolean
   parts: UIMessage["parts"]
-  copied: boolean
-  copyToClipboard: () => void
   className?: string
 }
 
-export function MessageUser({
+// A message never changes once sent, so id, parts and the anchor flag are the
+// whole identity; streaming another message does not re-render this one.
+export const MessageUser = React.memo(function MessageUser({
   hasScrollAnchor,
   parts,
-  copied,
-  copyToClipboard,
   className,
-}: MessageUserProps) {
+}: MessageUserProps & { id: string }) {
   const children = textFromMessage({ parts })
+  const { copied, copy: copyToClipboard } = useCopy(children)
   const attachments = attachmentsFromMessage({ parts })
   return (
     <MessageContainer
@@ -137,4 +137,9 @@ export function MessageUser({
       </MessageActions>
     </MessageContainer>
   )
-}
+}, (a, b) =>
+  a.id === b.id &&
+  a.parts === b.parts &&
+  a.hasScrollAnchor === b.hasScrollAnchor &&
+  a.className === b.className
+)

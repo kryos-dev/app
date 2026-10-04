@@ -41,19 +41,37 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   try {
-    const { title, model, projectId } = await request.json()
+    const { id, title, model, projectId } = await request.json()
+
+    // The client names the chat before the first send so the page it is
+    // already showing keeps its identity; anything but a UUID is ignored.
+    const chatId =
+      typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+        ? id
+        : undefined
 
     await checkUsage(user.id)
 
-    const [chat] = await db
+    let [chat] = await db
       .insert(schema.chats)
       .values({
+        ...(chatId ? { id: chatId } : {}),
         userId: user.id,
         title: title || "New Chat",
         model,
         projectId: projectId || null,
       })
+      .onConflictDoNothing()
       .returning()
+
+    // The id was taken: a retry of this same create returns the row, anyone
+    // else's chat is refused.
+    if (!chat && chatId) {
+      ;[chat] = await db.select().from(schema.chats).where(eq(schema.chats.id, chatId))
+      if (chat && chat.userId !== user.id) {
+        return NextResponse.json({ error: "Chat id already in use" }, { status: 409 })
+      }
+    }
 
     return NextResponse.json({ chat: toChatDTO(chat) })
   } catch (err: unknown) {

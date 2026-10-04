@@ -2,7 +2,7 @@
 // Pure helpers only: the db and model calls in lib/title.ts are not touched.
 import assert from "node:assert/strict"
 import test from "node:test"
-import { cleanTitle, isPlaceholderTitle } from "./title-text"
+import { cleanTitle, isPlaceholderTitle, titleFromMessage } from "./title-text"
 
 test("a title the client invented is ours to replace", () => {
   const msg = "Explain the project layout to me please"
@@ -26,4 +26,12 @@ test("model answers are cleaned up", () => {
   assert.equal(cleanTitle("<think>hmm, six words</think>\nDeploy pipeline fix"), "Deploy pipeline fix")
   assert.equal(cleanTitle("  \n  Voice latency tuning \n more"), "Voice latency tuning")
   assert.equal(cleanTitle(""), "")
+})
+
+test("title is the first line, capped at 60 characters", () => {
+  assert.equal(titleFromMessage("\n  Fix the build  \nthen deploy"), "Fix the build")
+  assert.equal(titleFromMessage(""), "")
+  const long = titleFromMessage("x".repeat(100))
+  assert.equal(long.length, 60)
+  assert.ok(long.endsWith("…"))
 })

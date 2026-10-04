@@ -2,7 +2,6 @@
 
 import { useBreakpoint } from "@/app/hooks/use-breakpoint"
 import { useChats } from "@/lib/chat-store/chats/provider"
-import { useMessages } from "@/lib/chat-store/messages/provider"
 import { useChatSession } from "@/lib/chat-store/session/provider"
 import { cn } from "@/lib/utils"
 import { ListMagnifyingGlass } from "@phosphor-icons/react"
@@ -29,7 +28,6 @@ export function HistoryTrigger({
   const isMobile = useBreakpoint(768)
   const router = useRouter()
   const { chats, updateTitle, deleteChat } = useChats()
-  const { deleteMessages } = useMessages()
   const [isOpen, setIsOpen] = useState(false)
   const { chatId } = useChatSession()
 
@@ -41,7 +39,6 @@ export function HistoryTrigger({
     if (id === chatId) {
       setIsOpen(false)
     }
-    await deleteMessages()
     await deleteChat(id, chatId!, () => router.push("/"))
   }
 

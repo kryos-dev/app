@@ -1,5 +1,4 @@
-// The string half of title generation, kept apart from lib/title.ts so it can
-// be tested without a database or a model behind it.
+// Pure title helpers, kept free of the database so they can be tested alone.
 
 const PLACEHOLDER = "New Chat"
 
@@ -41,4 +40,10 @@ export function cleanTitle(text: string): string {
       .replace(/^["'“”\s]+|["'“”\s.]+$/g, "")
       .slice(0, 80) ?? ""
   )
+}
+
+/** Chat title taken from the first user message: its first line, at most 60 characters. */
+export function titleFromMessage(text: string): string {
+  const line = text.split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? ""
+  return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line
 }

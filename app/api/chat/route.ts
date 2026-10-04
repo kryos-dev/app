@@ -1,16 +1,16 @@
 import { chatOwnerId } from "@/lib/auth/guards"
 import { canvasSystemPromptAddendum } from "@/lib/canvas/prompt"
-import { adoptHermesTitle } from "@/lib/title"
+import { isPlaceholderTitle, titleFromMessage } from "@/lib/title-text"
 import { SYSTEM_PROMPT_DEFAULT } from "@/lib/config"
 import { projectContext } from "@/lib/projects/context"
 import { ensureHermesSession, hermesRequest } from "@/lib/hermes/client"
 import { hermesSessionStreamToUIMessageStream } from "@/lib/hermes/stream"
-import { beginRun, endRun, type Run } from "@/lib/runs"
+import { beginRun, endRun } from "@/lib/runs"
 import { THINKING_EFFORTS, THINKING_EFFORT_DEFAULT } from "@/lib/thinking-effort"
 import { getCurrentUser } from "@/lib/auth"
 import { db, schema } from "@/lib/db"
 import { createUIMessageStreamResponse, type UIMessage } from "ai"
-import { eq } from "drizzle-orm"
+import { count, eq, sql } from "drizzle-orm"
 import { incrementMessageCount, validateAndTrackUsage } from "./api"
 import { createErrorResponse } from "./utils"
 
@@ -29,24 +29,82 @@ type ChatRequest = {
   canvasTitle?: string
 }
 
-// Hermes stores the turn itself; what is left to do when it ends is releasing
-// the run and titling the chat.
-async function finishTurn({
+// Hermes only runs the turn; the transcript is Zola's. The user's row is
+// written when the turn starts (so a reload mid-turn still shows the question)
+// and the assistant's when it ends, under the id already streamed to the client
+// so a message rated before any reload keeps the same reference.
+async function saveUserTurn({
   chatId,
-  sessionId,
-  userText,
-  run,
+  userId,
+  model,
+  message,
+  text,
 }: {
   chatId: string
-  sessionId: string
-  userText: string
-  run: Run
+  userId: string
+  model: string
+  message: UIMessage
+  text: string
 }) {
-  endRun(chatId, run)
+  const [{ n }] = await db
+    .select({ n: count() })
+    .from(schema.messages)
+    .where(eq(schema.messages.chatId, chatId))
+  await db.insert(schema.messages).values({
+    chatId,
+    userId,
+    role: "user",
+    content: text,
+    parts: message.parts,
+    model,
+  })
+  // The chat is opened with the whole message as its title; the first turn
+  // trims it to the first line.
+  if (n === 0 && text.trim()) {
+    const [chat] = await db
+      .select({ title: schema.chats.title })
+      .from(schema.chats)
+      .where(eq(schema.chats.id, chatId))
+    if (chat && isPlaceholderTitle(chat.title, text)) {
+      await db
+        .update(schema.chats)
+        .set({ title: titleFromMessage(text) })
+        .where(eq(schema.chats.id, chatId))
+    }
+  }
+}
+
+async function finishTurn({
+  chatId,
+  userId,
+  model,
+  messageId,
+  message,
+}: {
+  chatId: string
+  userId: string
+  model: string
+  messageId: number
+  message: UIMessage
+}) {
   try {
-    await adoptHermesTitle({ chatId, sessionId, userText })
+    // Nothing but bookkeeping parts means nothing was said; no empty row.
+    if (message.parts.some((p) => !p.type.startsWith("data-"))) {
+      await db.insert(schema.messages).values({
+        id: messageId,
+        chatId,
+        userId,
+        role: "assistant",
+        content: message.parts
+          .filter((p): p is { type: "text"; text: string } => p.type === "text")
+          .map((p) => p.text)
+          .join(""),
+        parts: message.parts,
+        model,
+      })
+    }
   } catch (err) {
-    console.error("Title generation failed:", err)
+    console.error("Saving the reply failed:", err)
   }
 }
 
@@ -162,7 +220,18 @@ ${canvasSystemPromptAddendum(canvasId ? canvasTitle : undefined)}`
 
     // The chat's Hermes session holds the conversation, so only the newest
     // message is sent.
-    const sessionId = await ensureHermesSession(chatId)
+    let sessionId: string
+    let assistantId: number
+    try {
+      sessionId = await ensureHermesSession(chatId)
+      const [row] = await db.execute<{ id: string }>(
+        sql`select nextval(pg_get_serial_sequence('messages', 'id')) as id`
+      )
+      assistantId = Number(row.id)
+    } catch (err) {
+      endRun(chatId, run)
+      throw err
+    }
     const send = () =>
       hermesRequest({
         message: userMessage,
@@ -194,19 +263,52 @@ ${canvasSystemPromptAddendum(canvasId ? canvasTitle : undefined)}`
       throw err
     }
 
+    // Written only now that Hermes accepted the turn, so a failed send leaves
+    // no question without a reply; still before any chunk reaches the client.
+    try {
+      await saveUserTurn({
+        chatId,
+        userId,
+        model,
+        message: userMessage,
+        text: lastUserText,
+      })
+    } catch (err) {
+      run.controller.abort()
+      endRun(chatId, run)
+      throw err
+    }
+
     const stream = hermesSessionStreamToUIMessageStream(
       hermesRes.body as ReadableStream<Uint8Array>,
       {
-        onFinish: () =>
-          finishTurn({ chatId, sessionId, userText: lastUserText, run }),
+        messageId: String(assistantId),
+        onFinish: ({ message }) =>
+          finishTurn({ chatId, userId, model, messageId: assistantId, message }),
       }
     )
 
     // Drain a tee'd copy of the SSE stream server-side so the run (and its
     // onFinish persistence) completes even when the browser navigates away
     // mid-reply; the tee's other branch is what the client cancels.
+    //
+    // Every chunk is recorded on the run before it is sent anywhere. This sits
+    // upstream of the tee, so recording follows the drained branch and goes on
+    // after the browser disconnects; a reattaching client replays from it.
     return createUIMessageStreamResponse({
-      stream,
+      stream: stream.pipeThrough(
+        new TransformStream({
+          transform(chunk, controller) {
+            run.publish(chunk)
+            controller.enqueue(chunk)
+          },
+          // The run ends after its last chunk was recorded and the reply row
+          // saved (the stream only closes once that write is done).
+          flush() {
+            endRun(chatId, run)
+          },
+        })
+      ),
       consumeSseStream: ({ stream }) =>
         stream.pipeTo(new WritableStream()).catch(() => {}),
     })

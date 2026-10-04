@@ -10,7 +10,6 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { SidebarMenuAction } from "@/components/ui/sidebar"
 import { useChats } from "@/lib/chat-store/chats/provider"
-import { useMessages } from "@/lib/chat-store/messages/provider"
 import { useChatSession } from "@/lib/chat-store/session/provider"
 import { Chat } from "@/lib/chat-store/types"
 import { toast } from "@/components/ui/toast"
@@ -44,7 +43,6 @@ export function SidebarItemMenu({
 }: SidebarItemMenuProps) {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const router = useRouter()
-  const { deleteMessages } = useMessages()
   const { deleteChat, togglePinned, moveChatToProject, setChatPublic } = useChats()
   const { chatId } = useChatSession()
   const isMobile = useBreakpoint(768)
@@ -80,7 +78,6 @@ export function SidebarItemMenu({
   }
 
   const handleConfirmDelete = async () => {
-    await deleteMessages()
     await deleteChat(chat.id, chatId!, () => router.push("/"))
   }
 

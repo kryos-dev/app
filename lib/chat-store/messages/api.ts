@@ -137,8 +137,23 @@ export async function getMessagesFromDb(chatId: string): Promise<ZolaUIMessage[]
   const res = await fetchClient(`${API_ROUTE_CHATS}/${chatId}/messages`)
   if (!res.ok) return []
 
-  const data: DbMessage[] = await res.json()
-  return data.map(fromDbMessage)
+  const data: { messages: DbMessage[] } = await res.json()
+  return data.messages.map(fromDbMessage)
+}
+
+export type ChatHistory = {
+  messages: ZolaUIMessage[]
+  /** A turn is still running on the server; `messages` ends with its question. */
+  pending: boolean
+}
+
+/** History for one chat; null when the chat does not exist, throws on any other failure. */
+export async function fetchChatMessages(chatId: string): Promise<ChatHistory | null> {
+  const res = await fetchClient(`${API_ROUTE_CHATS}/${chatId}/messages`)
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error("Failed to load messages")
+  const data: { messages: DbMessage[]; pending: boolean } = await res.json()
+  return { messages: data.messages.map(fromDbMessage), pending: data.pending }
 }
 
 async function deleteMessagesFromDb(chatId: string) {

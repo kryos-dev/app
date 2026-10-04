@@ -5,8 +5,10 @@ import {
 } from "@/components/ai-elements/conversation"
 import type { ZolaUIMessage } from "@/lib/chat-store/messages/api"
 import { useCallback, useRef } from "react"
-import { Loader } from "./loader"
-import { Message } from "./message"
+import { Shimmer } from "@/components/ai-elements/shimmer"
+import { MessageAssistant } from "./message-assistant"
+import { MessageUser } from "./message-user"
+import { isVisiblePart } from "./utils"
 
 type ConversationProps = {
   messages: ZolaUIMessage[]
@@ -24,6 +26,12 @@ export function Conversation({
   topMask = true,
 }: ConversationProps) {
   const initialMessageCount = useRef(messages.length)
+  const busy = status === "submitted" || status === "streaming"
+  const last = messages[messages.length - 1]
+  const waiting =
+    busy &&
+    messages.length > 0 &&
+    (last.role !== "assistant" || !last.parts.some(isVisiblePart))
 
   // Message is memoised on the fields that drive its output and the callbacks
   // are deliberately not among them; a ref hands each Message a stable wrapper
@@ -55,50 +63,46 @@ export function Conversation({
           }}
         >
           <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-4">
-            {messages?.map((message, index) => {
-              const isLast =
-                index === messages.length - 1 && status !== "submitted"
+            {messages.map((message, index) => {
+              const isLast = index === messages.length - 1
               // The anchor's min-height (about a screen) lets the new question
-              // scroll to the top while its reply streams. Kept after the
-              // reply ended it left a screen of blank space under any short
-              // answer, most visible on a phone.
+              // scroll to the top while its reply streams, and is dropped when
+              // it ends so a short answer leaves no blank screen under it.
               const hasScrollAnchor =
-                isLast &&
-                status === "streaming" &&
-                messages.length > initialMessageCount.current
+                isLast && busy && messages.length > initialMessageCount.current
 
-              return (
-                <Message
-                  // Index, not id: after a reply finishes, syncRecentMessages
-                  // swaps the client ids for the DB ids, and an id key then
-                  // remounted both messages (markdown re-rendered from
-                  // scratch, canvas cards lost their state) -- a visible
-                  // flash as the stream ended. The list only ever appends
-                  // or truncates, so position is a stable identity.
-                  key={index}
-                  id={message.id}
-                  variant={message.role}
-                  parts={message.parts}
-                  isLast={isLast}
-                  hasScrollAnchor={hasScrollAnchor}
-                  status={status}
-                  onQuote={stableOnQuote}
-                />
-              )
+              if (message.role === "user")
+                return (
+                  <MessageUser
+                    key={message.id}
+                    id={message.id}
+                    parts={message.parts}
+                    hasScrollAnchor={hasScrollAnchor}
+                  />
+                )
+              if (message.role === "assistant")
+                return (
+                  <MessageAssistant
+                    key={message.id}
+                    id={message.id}
+                    parts={message.parts}
+                    streaming={isLast && busy}
+                    hasScrollAnchor={hasScrollAnchor}
+                    onQuote={stableOnQuote}
+                  />
+                )
+              return null
             })}
-            {/* "streaming" too: status updates at once but the messages
-                snapshot is throttled, so the assistant message can lag a frame. */}
-            {(status === "submitted" || status === "streaming") &&
-              messages.length > 0 &&
-              messages[messages.length - 1].role === "user" && (
-                // Same width and gutters as the assistant Message that
-                // replaces it. Without them the "Thinking…" row sat at the
-                // list's left edge and then jumped 24px right the moment the
-                // first part arrived, which is what reads as two indicators.
-                <div className="group min-h-scroll-anchor flex w-full min-w-0 max-w-3xl flex-col items-start gap-2 px-0 sm:px-6">
-                  <Loader />
+            {/* The one placeholder: a reply is pending and nothing of it is
+                drawable yet. Same gutters as the assistant message, so the
+                first real part replaces it in place. */}
+            {waiting && (
+              <div className="group min-h-scroll-anchor flex w-full min-w-0 max-w-3xl flex-col items-start gap-2 px-0 sm:px-6">
+                <div className="text-muted-foreground py-1 text-sm">
+                  <Shimmer as="span">Thinking…</Shimmer>
                 </div>
-              )}
+              </div>
+            )}
           </div>
         </ConversationContent>
         <div className="absolute bottom-0 mx-auto flex w-full max-w-3xl flex-1 items-end justify-end gap-4 px-4 pb-2">

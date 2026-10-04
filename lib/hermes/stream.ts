@@ -29,6 +29,8 @@ import { toolTimer, turnData } from "@/lib/turn"
 // appended, otherwise `content` follows as a separate final text part.
 
 type HermesStreamOpts = {
+  /** Id the assistant message is created under; the SDK invents one when omitted. */
+  messageId?: string
   onFinish?: (payload: { message: UIMessage }) => void | Promise<void>
 }
 
@@ -44,7 +46,8 @@ const TEXT_ID = "hermes-text"
 
 async function writeHermesSession(
   sse: ReadableStream<Uint8Array>,
-  writer: UIMessageStreamWriter
+  writer: UIMessageStreamWriter,
+  messageId?: string
 ): Promise<void> {
   const decoder = new TextDecoder()
   let textOpen = false
@@ -59,7 +62,7 @@ async function writeHermesSession(
   const running = new Map<string, string[]>()
   let toolCount = 0
 
-  writer.write({ type: "start" })
+  writer.write({ type: "start", ...(messageId ? { messageId } : {}) })
 
   // Each thinking block gets its own part and closes as soon as text or a tool
   // call follows.
@@ -288,7 +291,7 @@ export function hermesSessionStreamToUIMessageStream(
   // the inner read loop is never starved.
   const inner = createUIMessageStream({
     execute: async ({ writer }) => {
-      await writeHermesSession(sse, writer)
+      await writeHermesSession(sse, writer, opts.messageId)
     },
     onFinish: async ({ responseMessage }) => {
       try {

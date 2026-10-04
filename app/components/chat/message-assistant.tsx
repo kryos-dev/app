@@ -5,14 +5,20 @@ import {
   MessageContent,
   MessageResponse,
 } from "@/components/ai-elements/message"
+import { Shimmer } from "@/components/ai-elements/shimmer"
 import { useWorkspace } from "@/app/components/workspace/workspace-provider"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import { useChatSession } from "@/lib/chat-store/session/provider"
 import { textFromMessage } from "@/lib/chat-store/messages/api"
 import { parseCanvasSegments } from "@/lib/canvas/parse"
 import { chunkForSpeech } from "@/lib/speech-chunks"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { cn } from "@/lib/utils"
-import { isToolUIPart, type UIMessage } from "ai"
+import type { UIMessage } from "ai"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import {
@@ -22,48 +28,125 @@ import {
   SpeakerHighIcon,
   StopIcon,
 } from "@phosphor-icons/react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { ChevronDownIcon } from "lucide-react"
+import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { CanvasBlock } from "./canvas-block"
-import { Loader } from "./loader"
 import { MessageFeedback } from "./message-feedback"
 import { QuoteButton } from "./quote-button"
-import { segmentParts, WorkGroup } from "./work-group"
+import { ToolInvocation } from "./tool-invocation"
 import { turnFromParts } from "@/lib/turn"
 import { useAssistantMessageSelection } from "./useAssistantMessageSelection"
+import { isVisiblePart, useCopy } from "./utils"
+
+type Part = UIMessage["parts"][number]
+type ReasoningPart = Extract<Part, { type: "reasoning" }>
+
+type Block =
+  | { kind: "text"; text: string }
+  | { kind: "reasoning"; part: ReasoningPart }
+  | { kind: "tools"; parts: Part[] }
+
+const isTool = (p: Part) => p.type.startsWith("tool-") || p.type === "dynamic-tool"
+
+// Parts in stream order; consecutive tool calls fold into one group, anything
+// else (text, reasoning) ends the group.
+function toBlocks(parts: Part[]): Block[] {
+  const out: Block[] = []
+  for (const p of parts) {
+    if (p.type === "text") {
+      if (p.text.trim()) out.push({ kind: "text", text: p.text })
+    } else if (p.type === "reasoning") {
+      out.push({ kind: "reasoning", part: p })
+    } else if (isTool(p)) {
+      const last = out[out.length - 1]
+      if (last?.kind === "tools") last.parts.push(p)
+      else out.push({ kind: "tools", parts: [p] })
+    }
+  }
+  return out
+}
+
+const triggerClass =
+  "text-muted-foreground hover:text-foreground flex items-center gap-1 py-1 text-left text-sm transition-colors"
+
+// The label depends only on whether the whole message is still streaming, so
+// it flips once, when the message ends, and never when new text arrives.
+function ToolGroup({
+  parts,
+  streaming,
+  timings,
+}: {
+  parts: Part[]
+  streaming: boolean
+  timings?: Record<string, number>
+}) {
+  const [open, setOpen] = useState(false)
+  const label = streaming
+    ? "Working…"
+    : `Used ${parts.length} ${parts.length === 1 ? "tool" : "tools"}`
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="w-full min-w-0">
+      <CollapsibleTrigger className={triggerClass}>
+        {streaming ? <Shimmer as="span">{label}</Shimmer> : <span>{label}</span>}
+        <ChevronDownIcon
+          className={cn("size-4 shrink-0 transition-transform", open && "rotate-180")}
+        />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="border-border mt-1 w-full min-w-0 border-l">
+        <ToolInvocation toolInvocations={parts} timings={timings} />
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+// Open while the thinking streams, closed once it ends. An explicit toggle by
+// the user wins; the part never goes back to streaming, so it never reopens.
+function ReasoningBlock({ part }: { part: ReasoningPart }) {
+  const streaming = part.state === "streaming"
+  const [userOpen, setUserOpen] = useState<boolean | null>(null)
+  const open = userOpen ?? streaming
+  if (!streaming && !part.text.trim()) return null
+  return (
+    <Collapsible open={open} onOpenChange={setUserOpen} className="w-full min-w-0">
+      <CollapsibleTrigger className={triggerClass}>
+        {streaming ? <Shimmer as="span">Thinking</Shimmer> : <span>Thinking</span>}
+        <ChevronDownIcon
+          className={cn("size-4 shrink-0 transition-transform", open && "rotate-180")}
+        />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="border-border mt-1 w-full min-w-0 border-l">
+        <div className="prose prose-sm dark:prose-invert text-muted-foreground w-full min-w-0 max-w-full px-3 py-1">
+          <MessageResponse>{part.text}</MessageResponse>
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
 
 type MessageAssistantProps = {
-  parts: UIMessage["parts"]
-  isLast?: boolean
+  id: string
+  parts: Part[]
+  /** This is the last message and a reply is still arriving. */
+  streaming: boolean
   hasScrollAnchor?: boolean
-  copied?: boolean
-  copyToClipboard?: () => void
-  status?: "streaming" | "ready" | "submitted" | "error"
   className?: string
-  messageId: string
   onQuote?: (text: string, messageId: string) => void
 }
 
-export function MessageAssistant({
+// Memoised on id, parts and the two flags that drive output, so streaming one
+// message does not re-render the others.
+export const MessageAssistant = memo(function MessageAssistant({
+  id: messageId,
   parts,
-  isLast,
+  streaming,
   hasScrollAnchor,
-  copied,
-  copyToClipboard,
-  status,
   className,
-  messageId,
   onQuote,
 }: MessageAssistantProps) {
   const { preferences } = useUserPreferences()
-  const children = textFromMessage({ parts })
-  const toolInvocationParts = parts?.filter(isToolUIPart) ?? []
-  const reasoningPart = parts?.find(
-    (part): part is { type: "reasoning"; text: string } => part.type === "reasoning"
-  )
-  const runs = segmentParts(parts ?? [])
-  const answerText = children
-  const contentNullOrEmpty = answerText === null || answerText === ""
-  const isLastStreaming = status === "streaming" && isLast
+  const answerText = textFromMessage({ parts })
+  const { copied, copy: copyToClipboard } = useCopy(answerText)
+  const contentNullOrEmpty = answerText === ""
   const turn = turnFromParts(parts)
   const { chatId } = useChatSession()
   const { openCanvas } = useWorkspace()
@@ -78,13 +161,6 @@ export function MessageAssistant({
     const canvas = await res.json()
     openCanvas(canvas.id, canvas.title, canvas.content)
   }, [chatId, contentNullOrEmpty, answerText, openCanvas])
-  const hasVisiblePart =
-    // Any reasoning part: an empty one is already a shimmering "Thinking" row.
-    Boolean(reasoningPart) ||
-    toolInvocationParts.length > 0 ||
-    !contentNullOrEmpty
-  const showThinking =
-    isLast && (status === "submitted" || status === "streaming") && !hasVisiblePart
 
   const isQuoteEnabled = !preferences.multiModelEnabled
   const messageRef = useRef<HTMLDivElement>(null)
@@ -98,6 +174,9 @@ export function MessageAssistant({
       clearSelection()
     }
   }, [selectionInfo, onQuote, clearSelection])
+
+  // Nothing to draw yet: the conversation shows the single placeholder row.
+  if (!parts.some(isVisiblePart)) return null
 
   return (
     <Message
@@ -116,32 +195,27 @@ export function MessageAssistant({
         className="relative flex w-full min-w-0 max-w-full flex-col gap-2"
         {...(isQuoteEnabled && { "data-message-id": messageId })}
       >
-        {showThinking && <Loader />}
-
-        {runs.map((run, i) =>
-          run.kind === "work" ? (
-            <WorkGroup
-              key={i}
-              parts={run.parts}
-              // Only the last run of the streaming message is live, so only
-              // one label on the page ever shimmers.
-              live={Boolean(
-                isLast &&
-                  i === runs.length - 1 &&
-                  (status === "streaming" || status === "submitted")
-              )}
-              timings={turn?.tools}
-              showTools={preferences.showToolInvocations}
-            />
+        {toBlocks(parts).map((block, i) =>
+          block.kind === "tools" ? (
+            preferences.showToolInvocations ? (
+              <ToolGroup
+                key={i}
+                parts={block.parts}
+                streaming={streaming}
+                timings={turn?.tools}
+              />
+            ) : null
+          ) : block.kind === "reasoning" ? (
+            <ReasoningBlock key={i} part={block.part} />
           ) : (
-            parseCanvasSegments(run.text).map((segment, j) =>
+            parseCanvasSegments(block.text).map((segment, j) =>
               segment.kind === "canvas" ? (
                 <CanvasBlock
                   key={`${i}-${j}`}
                   title={segment.title}
                   content={segment.content}
                   complete={segment.complete}
-                  streaming={Boolean(isLastStreaming)}
+                  streaming={streaming}
                 />
               ) : segment.text.trim() ? (
                 <MessageContent
@@ -164,17 +238,11 @@ export function MessageAssistant({
           )
         )}
 
-        {Boolean(isLastStreaming || contentNullOrEmpty) ? null : (
+        {streaming || contentNullOrEmpty ? null : (
           <MessageActions
             className={cn(
-              // Visible by default, hover-revealed only from md up.
-              //
-              // This row was `opacity-0 group-hover:opacity-100` at every width,
-              // and a touch screen has no hover -- so copy and canvas
-              // were not merely hard to find on a phone, they were
-              // unreachable. The owner uses this on a phone almost exclusively.
-              // Adding a thumbs button to a row nobody can see would not have
-              // shipped a feature.
+              // Visible by default, hover-revealed only from md up: a touch
+              // screen has no hover, so a hover-only row is unreachable there.
               "-ml-2 flex gap-0 transition-opacity",
               "opacity-100 md:opacity-0 md:group-hover:opacity-100"
             )}
@@ -211,7 +279,14 @@ export function MessageAssistant({
       </div>
     </Message>
   )
-}
+}, (a, b) =>
+  a.id === b.id &&
+  a.parts === b.parts &&
+  a.streaming === b.streaming &&
+  a.hasScrollAnchor === b.hasScrollAnchor &&
+  a.className === b.className &&
+  a.onQuote === b.onQuote
+)
 
 // Speaks the answer through /api/voice/speech. Tap again
 // to stop. The Audio element is created and play()ed inside the tap itself:

@@ -23,14 +23,56 @@
  * the run through shared state.
  */
 
+import type { UIMessageChunk } from "ai"
+
 type Run = {
   controller: AbortController
   /** Settles when the turn ends or is aborted; queued sends wait on it. */
   done: Promise<void>
+  /** Ends the run: resolves `done` and closes every subscriber. */
   finish: () => void
+  /** Record a UI message stream chunk and pass it to live subscribers. */
+  publish: (chunk: UIMessageChunk) => void
+  /** Every chunk so far, then the live ones; closes when the run finishes. */
+  subscribe: () => ReadableStream<UIMessageChunk>
 }
 
 const runs = new Map<string, Run>()
+
+// The chunks of one turn are kept so a client whose connection dropped can
+// reattach: it gets the buffer replayed, then the rest as it is produced.
+function makeBuffer() {
+  const chunks: UIMessageChunk[] = []
+  const subscribers = new Set<ReadableStreamDefaultController<UIMessageChunk>>()
+  let closed = false
+  return {
+    publish(chunk: UIMessageChunk) {
+      if (closed) return
+      chunks.push(chunk)
+      for (const s of subscribers) s.enqueue(chunk)
+    },
+    subscribe() {
+      let ctrl: ReadableStreamDefaultController<UIMessageChunk>
+      return new ReadableStream<UIMessageChunk>({
+        start(c) {
+          ctrl = c
+          for (const chunk of chunks) c.enqueue(chunk)
+          if (closed) c.close()
+          else subscribers.add(c)
+        },
+        cancel() {
+          subscribers.delete(ctrl)
+        },
+      })
+    },
+    close() {
+      if (closed) return
+      closed = true
+      for (const s of subscribers) s.close()
+      subscribers.clear()
+    },
+  }
+}
 
 /** Start tracking a turn. Waits for the chat's running turn, if any, to end. */
 export async function beginRun(chatId: string): Promise<Run> {
@@ -39,18 +81,40 @@ export async function beginRun(chatId: string): Promise<Run> {
   while (runs.get(chatId)) await runs.get(chatId)!.done
   let finish!: () => void
   const done = new Promise<void>((resolve) => (finish = resolve))
-  const run: Run = { controller: new AbortController(), done, finish }
+  const buffer = makeBuffer()
+  const run: Run = {
+    controller: new AbortController(),
+    done,
+    finish: () => {
+      buffer.close()
+      finish()
+    },
+    publish: buffer.publish,
+    subscribe: buffer.subscribe,
+  }
   runs.set(chatId, run)
   return run
 }
 
-/** Abort the chat's in-flight turn, if there is one. True when one was aborted. */
+/** The chat's running turn, if any. */
+export function getRun(chatId: string): Run | undefined {
+  return runs.get(chatId)
+}
+
+/** Whether a turn is currently running for the chat. */
+export function hasRun(chatId: string): boolean {
+  return runs.has(chatId)
+}
+
+/**
+ * Abort the chat's in-flight turn, if there is one. True when one was aborted.
+ * The run stays registered: aborting ends the Hermes stream, the partial reply
+ * is saved, and only then does `endRun` release it.
+ */
 export function abortRun(chatId: string): boolean {
   const run = runs.get(chatId)
   if (!run) return false
-  runs.delete(chatId)
   run.controller.abort()
-  run.finish()
   return true
 }
 

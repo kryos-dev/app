@@ -185,13 +185,14 @@ export async function createNewChat(
   title?: string,
   model?: string,
   _isAuthenticated?: boolean,
-  projectId?: string
+  projectId?: string,
+  id?: string
 ): Promise<Chats> {
   try {
     const res = await fetchClient(API_ROUTE_CHATS, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, model, projectId }),
+      body: JSON.stringify({ id, title, model, projectId }),
     })
 
     const responseData = await res.json()

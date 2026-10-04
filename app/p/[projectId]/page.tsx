@@ -1,7 +1,6 @@
 import { LayoutApp } from "@/app/components/layout/layout-app"
 import { ProjectView } from "@/app/p/[projectId]/project-view"
 import { getCurrentUser } from "@/lib/auth"
-import { MessagesProvider } from "@/lib/chat-store/messages/provider"
 import { db, schema } from "@/lib/db"
 import { and, eq } from "drizzle-orm"
 import { redirect } from "next/navigation"
@@ -28,10 +27,8 @@ export default async function Page({ params }: Props) {
   }
 
   return (
-    <MessagesProvider>
-      <LayoutApp>
-        <ProjectView projectId={projectId} key={projectId} />
-      </LayoutApp>
-    </MessagesProvider>
+    <LayoutApp>
+      <ProjectView projectId={projectId} key={projectId} />
+    </LayoutApp>
   )
 }

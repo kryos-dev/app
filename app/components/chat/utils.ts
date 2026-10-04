@@ -1,3 +1,6 @@
+import { useState } from "react"
+import type { UIMessage } from "ai"
+
 export const addUTM = (url: string) => {
   try {
     // Check if the URL is valid
@@ -51,3 +54,24 @@ export const getSiteName = (url: string) => {
     return url
   }
 }
+
+/** Copy handler plus a short-lived "copied" flag for the check icon. */
+export function useCopy(text: string) {
+  const [copied, setCopied] = useState(false)
+  const copy = () => {
+    navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 500)
+  }
+  return { copied, copy }
+}
+
+/**
+ * Whether a part draws anything. Empty reasoning, whitespace-only text and
+ * bookkeeping parts do not.
+ */
+export const isVisiblePart = (part: UIMessage["parts"][number]) =>
+  (part.type === "reasoning" && part.text.trim() !== "") ||
+  part.type === "dynamic-tool" ||
+  part.type.startsWith("tool-") ||
+  (part.type === "text" && part.text.trim() !== "")

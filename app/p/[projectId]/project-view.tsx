@@ -3,7 +3,6 @@
 import { formatDate } from "@/app/components/history/utils"
 import { ChatInput } from "@/app/components/chat-input/chat-input"
 import { Conversation } from "@/app/components/chat/conversation"
-import { useChatOperations } from "@/app/components/chat/use-chat-operations"
 import { useFileUpload } from "@/app/components/chat/use-file-upload"
 import { useModel } from "@/app/components/chat/use-model"
 import { InstructionsDialog } from "@/app/p/[projectId]/_components/instructions-dialog"
@@ -24,7 +23,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "@/components/ui/toast"
 import { useChats } from "@/lib/chat-store/chats/provider"
 import type { ZolaUIMessage } from "@/lib/chat-store/messages/api"
-import { useMessages } from "@/lib/chat-store/messages/provider"
 import { MESSAGE_MAX_LENGTH, SYSTEM_PROMPT_DEFAULT } from "@/lib/config"
 import { Attachment } from "@/lib/file-handling"
 import { API_ROUTE_CHAT } from "@/lib/routes"
@@ -254,7 +252,6 @@ export function ProjectView({ projectId }: ProjectViewProps) {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const { user } = useUser()
   const { createNewChat, bumpChat } = useChats()
-  const { cacheAndAddMessage } = useMessages()
   const pathname = usePathname()
   const {
     files,
@@ -317,13 +314,11 @@ export function ProjectView({ projectId }: ProjectViewProps) {
 
   const { messages, status, stop, setMessages, sendMessage } =
     useChat<ZolaUIMessage>({
-      // Same as use-chat-core.ts: batch paints, or every token re-parses the
-      // whole reply's markdown.
+      // Batch paints, or every token re-parses the whole reply's markdown.
       throttle: 50,
       id: `project-${projectId}-${currentChatId}`,
       messages: [],
       transport,
-      onFinish: async ({ message }) => cacheAndAddMessage(message),
       onError: handleError,
     })
 
@@ -391,17 +386,6 @@ export function ProjectView({ projectId }: ProjectViewProps) {
       projectId,
     ]
   )
-
-  const { handleDelete } = useChatOperations({
-    isAuthenticated: true, // Always authenticated in project context
-    chatId: null,
-    messages,
-    selectedModel,
-    systemPrompt: SYSTEM_PROMPT_DEFAULT,
-    createNewChat,
-    setMessages,
-    setInput,
-  })
 
   // Simple input change handler for project context (no draft saving needed)
   const handleInputChange = useCallback((value: string) => {
@@ -479,11 +463,6 @@ export function ProjectView({ projectId }: ProjectViewProps) {
         }
       )
 
-      cacheAndAddMessage({
-        ...optimisticMessage,
-        parts: [textPart(submittedInput), ...attachmentsToFileParts(attachments)],
-      })
-
       // Bump existing chats to top (non-blocking, after submit)
       if (messages.length > 0) {
         bumpChat(currentChatIdResolved)
@@ -507,7 +486,6 @@ export function ProjectView({ projectId }: ProjectViewProps) {
     handleFileUploads,
     selectedModel,
     sendMessage,
-    cacheAndAddMessage,
     messages.length,
     bumpChat,
     enableSearch,
@@ -518,9 +496,8 @@ export function ProjectView({ projectId }: ProjectViewProps) {
     () => ({
       messages,
       status,
-      onDelete: handleDelete,
     }),
-    [messages, status, handleDelete]
+    [messages, status]
   )
 
   // Memoize the chat input props
