@@ -43,7 +43,7 @@ export function WebTool({ toolName, toolData, className }: ToolBodyProps) {
     body = text ? (
       <CodeOutput code={text} />
     ) : (
-      <div className="text-muted-foreground text-xs">
+      <div className="text-muted-foreground text-sm">
         {isRunning ? "Extracting…" : "No content"}
       </div>
     )
@@ -65,14 +65,14 @@ export function WebTool({ toolName, toolData, className }: ToolBodyProps) {
               {hostname(item.url)}
             </div>
             {item.snippet && (
-              <div className="text-muted-foreground mt-1 line-clamp-2 text-xs">
+              <div className="text-muted-foreground mt-1 line-clamp-2 text-sm">
                 {item.snippet}
               </div>
             )}
           </a>
         ))}
         {remaining > 0 && (
-          <div className="text-muted-foreground px-1.5 text-xs">
+          <div className="text-muted-foreground px-1.5 text-sm">
             +{remaining} more
           </div>
         )}
@@ -80,7 +80,7 @@ export function WebTool({ toolName, toolData, className }: ToolBodyProps) {
     )
   } else {
     body = (
-      <div className="text-muted-foreground text-xs">
+      <div className="text-muted-foreground text-sm">
         {isRunning ? "Working…" : "No results"}
       </div>
     )
@@ -89,7 +89,7 @@ export function WebTool({ toolName, toolData, className }: ToolBodyProps) {
   return (
     <div className={className}>
       {detail && (
-        <div className="text-muted-foreground mb-2 truncate text-xs">{detail}</div>
+        <div className="text-muted-foreground mb-2 truncate text-sm">{detail}</div>
       )}
       {body}
     </div>

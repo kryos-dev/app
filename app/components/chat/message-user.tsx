@@ -93,7 +93,7 @@ export function MessageUser({
               </MorphingDialogContainer>
             </MorphingDialog>
           ) : attachment.contentType?.startsWith("text") ? (
-            <div className="text-primary mb-3 h-24 w-40 overflow-hidden rounded-md border p-2 text-xs">
+            <div className="text-primary mb-3 h-24 w-40 overflow-hidden rounded-md border p-2 text-sm">
               {getTextFromDataUrl(attachment.url)}
             </div>
           ) : null}
@@ -102,7 +102,7 @@ export function MessageUser({
       <MessageContent
         // Not `break-words` as well: both set overflow-wrap, `break-word`
         // won, and a pasted URL ran out of the bubble (390px).
-        className="bg-accent prose dark:prose-invert relative max-w-3/4 rounded-3xl px-5 py-2.5 [overflow-wrap:anywhere]"
+        className="bg-accent prose dark:prose-invert text-base leading-7 relative max-w-3/4 rounded-3xl px-5 py-2.5 [overflow-wrap:anywhere]"
       >
         <MessageResponse
           components={{

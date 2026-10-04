@@ -34,10 +34,10 @@ export function MediaTool({ toolName, toolData, className }: ToolBodyProps) {
             alt={caption || toolName}
             className="max-h-80 max-w-80 rounded border object-contain"
           />
-          {caption && <div className="text-muted-foreground text-xs">{caption}</div>}
+          {caption && <div className="text-muted-foreground text-sm">{caption}</div>}
         </div>
       ) : (
-        <div className="text-muted-foreground text-xs">
+        <div className="text-muted-foreground text-sm">
           {isRunning ? "Processing…" : caption || "No image"}
         </div>
       )}

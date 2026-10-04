@@ -81,7 +81,7 @@ function DiffView({ file }: { file: DiffFile }) {
   return (
     <CodeBlock className="rounded-md">
       {file.path && (
-        <CodeBlockGroup className="border-border text-muted-foreground border-b px-3 py-1.5 font-mono text-xs">
+        <CodeBlockGroup className="border-border text-muted-foreground border-b px-3 py-1.5 font-mono text-sm">
           <span className="min-w-0 flex-1 truncate text-left">{file.path}</span>
           <span className="flex shrink-0 gap-2">
             <span className="text-success">
@@ -119,7 +119,7 @@ export function FileTool({ toolName, toolData, className }: ToolBodyProps) {
     body = (
       <div className="space-y-1">
         {path && (
-          <span className="text-muted-foreground block truncate text-left font-mono text-xs">
+          <span className="text-muted-foreground block truncate text-left font-mono text-sm">
             {path}
           </span>
         )}
@@ -144,7 +144,7 @@ export function FileTool({ toolName, toolData, className }: ToolBodyProps) {
           ))}
         </div>
       ) : (
-        <div className="text-muted-foreground text-xs">
+        <div className="text-muted-foreground text-sm">
           {isRunning ? "Editing…" : "No diff"}
         </div>
       )
@@ -158,12 +158,12 @@ export function FileTool({ toolName, toolData, className }: ToolBodyProps) {
     body = (
       <div className="space-y-1">
         {query && (
-          <div className="text-muted-foreground text-xs">
+          <div className="text-muted-foreground text-sm">
             Query: <span className="font-mono">{query}</span>
           </div>
         )}
         {matches.length > 0 ? (
-          <ul className="space-y-0.5 font-mono text-xs">
+          <ul className="space-y-0.5 font-mono text-sm">
             {matches.map((m, i) => (
               <li key={i} className="truncate">
                 {typeof m === "string" ? m : JSON.stringify(m)}
@@ -171,7 +171,7 @@ export function FileTool({ toolName, toolData, className }: ToolBodyProps) {
             ))}
           </ul>
         ) : (
-          <div className="text-muted-foreground text-xs">
+          <div className="text-muted-foreground text-sm">
             {isRunning ? "Searching…" : "No matches"}
           </div>
         )}
@@ -185,14 +185,14 @@ export function FileTool({ toolName, toolData, className }: ToolBodyProps) {
     body = content ? (
       <div className="space-y-1">
         {path && (
-          <span className="text-muted-foreground block truncate text-left font-mono text-xs">
+          <span className="text-muted-foreground block truncate text-left font-mono text-sm">
             {path}
           </span>
         )}
         <CodeOutput code={content} language={languageFromPath(path)} />
       </div>
     ) : (
-      <div className="text-muted-foreground text-xs">
+      <div className="text-muted-foreground text-sm">
         {isRunning ? "Reading…" : "No content"}
       </div>
     )

@@ -33,7 +33,7 @@ export function SummaryTool({ toolData, className }: ToolBodyProps) {
 
   return (
     <div className={className}>
-      <div className="space-y-2 font-mono text-xs">
+      <div className="space-y-2 font-mono text-sm">
         {/* Hermes emits a tool's output atomically (response.output_item.done),
             so nothing streams while a report/skill tool runs. The request is
             the only thing we have before it returns, so show that. */}

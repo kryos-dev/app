@@ -45,7 +45,7 @@ export function PlanTool({ toolData, className }: ToolBodyProps) {
   if (todos.length === 0) {
     return (
       <div className={className}>
-        <div className="text-muted-foreground text-xs">No tasks</div>
+        <div className="text-muted-foreground text-sm">No tasks</div>
       </div>
     )
   }
