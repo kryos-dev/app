@@ -6,7 +6,7 @@ Chat UI for the Hermes agent. Next.js 16 app router, React 19, AI SDK 7, Drizzle
 
 ## Backends
 
-Hermes gateway (`HERMES_API_URL`, Bearer `HERMES_API_KEY`): chat over `/v1/responses` SSE, one Hermes session per chat via `X-Hermes-Session-Key`, native reasoning deltas, images as `input_image` data URLs, other attachments referenced by their `BLOB_HOST_DIR` path. Hermes dashboard (`HERMES_DASHBOARD_URL`, basic-provider cookie login): skills, connectors (MCP), scheduled jobs, memory, model options, env keys, provider OAuth, audio (`/api/audio/transcribe`, `/api/audio/speak`), gateway restart. Zola's own Postgres: chats, messages, projects (saved prompts), canvases, feedback, preferences. Nothing else; features whose backend does not exist are removed, not stubbed.
+Hermes gateway (`HERMES_API_URL`, Bearer `HERMES_API_KEY`): chat over `/v1/responses` SSE (stateless: the whole chat goes in `input` as text, the new turn last; `X-Hermes-Session-Key` = chat id only scopes the agent's memory), native reasoning deltas, images as `input_image` data URLs, other attachments referenced by their `BLOB_HOST_DIR` path. Hermes dashboard (`HERMES_DASHBOARD_URL`, basic-provider cookie login): skills, connectors (MCP), scheduled jobs, memory, model options, env keys, provider OAuth, audio (`/api/audio/transcribe`, `/api/audio/speak`), gateway restart. Zola's own Postgres: chats, messages, projects (saved prompts), canvases, feedback, preferences. Nothing else; features whose backend does not exist are removed, not stubbed.
 
 ## Look and feel
 

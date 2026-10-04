@@ -257,10 +257,9 @@ ${canvasSystemPromptAddendum(canvasId ? canvasTitle : undefined)}`
     // left the chat unable to answer anything at all).
     const run = beginRun(chatId)
 
-    // Hermes runs its own model + tools server-side and keeps the history in
-    // the chat's session, so only the new user turn is sent.
+    // The whole chat is sent because the gateway's Responses endpoint keeps no history of its own.
     const hermesRes = await hermesRequest({
-      message: userMessage,
+      messages,
       model,
       chatId,
       systemPrompt: effectiveSystemPrompt,

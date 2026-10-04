@@ -30,16 +30,20 @@ type InputPart =
 
 const BLOB_URL_PREFIX = "/api/files/"
 
+function textOf(message: UIMessage): string {
+  return message.parts
+    .filter((p): p is { type: "text"; text: string } => p.type === "text")
+    .map((p) => p.text)
+    .join("")
+}
+
 // The new user turn as Responses input. Images are inlined as data URLs (the
 // endpoint accepts only text and image parts); any other file is named in the
 // text by its path on the Hermes host so the agent opens it with its own tools.
 async function userTurnInput(
   message: UIMessage
 ): Promise<string | [{ role: "user"; content: InputPart[] }]> {
-  let text = message.parts
-    .filter((p): p is { type: "text"; text: string } => p.type === "text")
-    .map((p) => p.text)
-    .join("")
+  let text = textOf(message)
   const images: InputPart[] = []
   const hostDir = (process.env.BLOB_HOST_DIR ?? "").replace(/\/+$/, "")
 
@@ -75,8 +79,8 @@ async function userTurnInput(
 }
 
 type HermesRequestArgs = {
-  /** The new user message; earlier turns live in the Hermes session. */
-  message: UIMessage
+  /** Every turn of the chat in order; the last one is the new user message. */
+  messages: UIMessage[]
   /** Zola model id; "hermes-agent" or empty means the agent's own default. */
   model?: string
   chatId: string
@@ -87,10 +91,11 @@ type HermesRequestArgs = {
 }
 
 // POSTs to the gateway's `/v1/responses` (stream: true) and returns the raw
-// Response for hermesResponsesToUIMessageStream. One Hermes session per chat,
-// keyed by chat id, so the gateway continues the conversation itself.
+// Response for hermesResponsesToUIMessageStream. `/v1/responses` is stateless:
+// earlier turns travel as text in `input`, and the session key (the chat id)
+// only scopes the agent's memory.
 export async function hermesRequest({
-  message,
+  messages,
   model,
   chatId,
   systemPrompt,
@@ -98,6 +103,16 @@ export async function hermesRequest({
   signal,
 }: HermesRequestArgs): Promise<Response> {
   const picked = decodeModelId(model)
+  const prior = messages
+    .slice(0, -1)
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => ({ role: m.role, content: textOf(m) }))
+    .filter((m) => m.content)
+  const last = await userTurnInput(messages[messages.length - 1])
+  const input = [
+    ...prior,
+    ...(typeof last === "string" ? [{ role: "user" as const, content: last }] : last),
+  ]
   const res = await fetch(`${process.env.HERMES_API_URL}/v1/responses`, {
     method: "POST",
     signal,
@@ -109,7 +124,7 @@ export async function hermesRequest({
     body: JSON.stringify({
       stream: true,
       instructions: systemPrompt,
-      input: await userTurnInput(message),
+      input,
       model_options: { reasoning_effort: reasoningEffort },
       // An explicit provider is always honored by the gateway; a bare model
       // would be dropped.
