@@ -1,6 +1,6 @@
 import { chatOwnerId } from "@/lib/auth/guards"
 import { canvasSystemPromptAddendum } from "@/lib/canvas/prompt"
-import { maybeGenerateTitle } from "@/lib/title"
+import { adoptHermesTitle } from "@/lib/title"
 import { SYSTEM_PROMPT_DEFAULT } from "@/lib/config"
 import { projectContext } from "@/lib/projects/context"
 import { ensureHermesSession, hermesRequest } from "@/lib/hermes/client"
@@ -33,22 +33,18 @@ type ChatRequest = {
 // the run and titling the chat.
 async function finishTurn({
   chatId,
-  message,
+  sessionId,
   userText,
   run,
 }: {
   chatId: string
-  message: UIMessage
+  sessionId: string
   userText: string
   run: Run
 }) {
   endRun(chatId, run)
-  const assistantText = message.parts
-    .filter((p): p is { type: "text"; text: string } => p.type === "text")
-    .map((p) => p.text)
-    .join("\n")
   try {
-    await maybeGenerateTitle({ chatId, userText, assistantText })
+    await adoptHermesTitle({ chatId, sessionId, userText })
   } catch (err) {
     console.error("Title generation failed:", err)
   }
@@ -162,11 +158,12 @@ ${canvasSystemPromptAddendum(canvasId ? canvasTitle : undefined)}`
 
     // The chat's Hermes session holds the conversation, so only the newest
     // message is sent.
+    const sessionId = await ensureHermesSession(chatId)
     const hermesRes = await hermesRequest({
       message: userMessage,
       model,
       chatId,
-      sessionId: await ensureHermesSession(chatId),
+      sessionId,
       systemPrompt: effectiveSystemPrompt,
       reasoningEffort: effort,
       // What makes Stop mean stop: aborting this cancels the request to
@@ -181,8 +178,8 @@ ${canvasSystemPromptAddendum(canvasId ? canvasTitle : undefined)}`
     const stream = hermesSessionStreamToUIMessageStream(
       hermesRes.body as ReadableStream<Uint8Array>,
       {
-        onFinish: ({ message }) =>
-          finishTurn({ chatId, message, userText: lastUserText, run }),
+        onFinish: () =>
+          finishTurn({ chatId, sessionId, userText: lastUserText, run }),
       }
     )
 
