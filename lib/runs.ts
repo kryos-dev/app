@@ -15,6 +15,9 @@
  * been generated at that point is persisted, and the database agrees with what
  * is on screen.
  *
+ * A second send for the same chat waits for the running turn to end, because
+ * Hermes allows one turn per session at a time.
+ *
  * ponytail: a module-level Map, because the box runs one Next process. If Zola
  * is ever scaled past one instance the abort has to reach the instance holding
  * the run through shared state.
@@ -22,14 +25,21 @@
 
 type Run = {
   controller: AbortController
+  /** Settles when the turn ends or is aborted; queued sends wait on it. */
+  done: Promise<void>
+  finish: () => void
 }
 
 const runs = new Map<string, Run>()
 
-/** Start tracking a turn. Any previous turn for the chat is aborted first. */
-export function beginRun(chatId: string): Run {
-  abortRun(chatId)
-  const run: Run = { controller: new AbortController() }
+/** Start tracking a turn. Waits for the chat's running turn, if any, to end. */
+export async function beginRun(chatId: string): Promise<Run> {
+  // A loop, not a single await: when several sends are queued, only the first
+  // to wake registers; the rest see its run and keep waiting.
+  while (runs.get(chatId)) await runs.get(chatId)!.done
+  let finish!: () => void
+  const done = new Promise<void>((resolve) => (finish = resolve))
+  const run: Run = { controller: new AbortController(), done, finish }
   runs.set(chatId, run)
   return run
 }
@@ -40,12 +50,14 @@ export function abortRun(chatId: string): boolean {
   if (!run) return false
   runs.delete(chatId)
   run.controller.abort()
+  run.finish()
   return true
 }
 
 /** Stop tracking a turn, but only if `run` is still the current one. */
 export function endRun(chatId: string, run: Run): void {
   if (runs.get(chatId) === run) runs.delete(chatId)
+  run.finish()
 }
 
 export type { Run }

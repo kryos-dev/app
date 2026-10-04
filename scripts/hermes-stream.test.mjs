@@ -60,10 +60,8 @@ const textOf = (message) =>
   const { chunks, message, types } = await run(sse, { split: true })
 
   assert.equal(chunks.filter((c) => c.type === "text-delta").map((c) => c.delta).join(""), "Hello")
-  assert.equal(
-    chunks.filter((c) => c.type === "reasoning-delta").map((c) => c.delta).join(""),
-    "hmm"
-  )
+  assert.ok(!types.some((t) => t.startsWith("reasoning")), "_thinking is not reasoning")
+  assert.ok(!message.parts.some((p) => p.type === "reasoning"))
   assert.equal(types.filter((t) => t === "finish").length, 1, "done must not finish twice")
   assert.equal(textOf(message), "Hello")
 
@@ -173,4 +171,43 @@ console.log("hermes-stream.test.mjs: all assertions passed")
   assert.ok(firstText >= 0)
   assert.equal(chunks[firstText + 1].delta, "Hello", "no whitespace-only text chunk before Hello")
   assert.equal(textOf(message), "Hello")
+}
+
+// --- reasoning.delta -> one reasoning part, then one text part. ---
+{
+  const { message } = await run(
+    frames([
+      ["reasoning.delta", { message_id: "m", delta: " " }],
+      ["reasoning.delta", { message_id: "m", delta: "think" }],
+      ["reasoning.delta", { message_id: "m", delta: "ing" }],
+      ["assistant.delta", { message_id: "m", delta: "Answer" }],
+      ["assistant.completed", { content: "Answer" }],
+      ["run.completed", {}],
+    ])
+  )
+  const kinds = message.parts.map((p) => p.type).filter((t) => t === "reasoning" || t === "text")
+  assert.deepEqual(kinds, ["reasoning", "text"])
+  assert.equal(message.parts.find((p) => p.type === "reasoning").text, "thinking")
+  assert.equal(textOf(message), "Answer")
+}
+
+// --- Plain turn: `_thinking` echoes the streamed text and must add nothing. ---
+{
+  const { message } = await run(
+    frames([
+      ["tool.started", { tool_name: "terminal", preview: "x", args: {} }],
+      ["tool.completed", { tool_name: "terminal", preview: "{}" }],
+      ["assistant.delta", { delta: "Hi" }],
+      ["assistant.delta", { delta: "!" }],
+      ["tool.progress", { tool_name: "_thinking", delta: "Hi!" }],
+      ["assistant.completed", { content: "Hi!" }],
+      ["run.completed", {}],
+    ])
+  )
+  const parts = message.parts.filter((p) => p.type !== "step-start" && p.type !== "data-turn")
+  assert.deepEqual(
+    parts.map((p) => p.type),
+    ["tool-terminal", "text"]
+  )
+  assert.equal(textOf(message), "Hi!")
 }

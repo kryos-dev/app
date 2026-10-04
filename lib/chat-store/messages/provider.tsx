@@ -128,7 +128,11 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
 
     try {
       setMessages((prev) => {
-        const updated = [...prev, message]
+        // The poll may have fetched a partial assistant row mid-turn; drop it
+        // so the finished message does not show as a second bubble.
+        let end = prev.length
+        while (end > 0 && prev[end - 1].role === "assistant") end--
+        const updated = [...prev.slice(0, end), message]
         writeToIndexedDB("messages", { id: chatId, messages: updated })
         return updated
       })

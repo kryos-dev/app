@@ -9,7 +9,7 @@ import { toolTimer, turnData } from "@/lib/turn"
 // Each frame is `event: <name>\ndata: <json>\n\n`; `: keepalive` comment
 // frames carry no data line and are skipped. Events:
 //   assistant.delta       {delta}                       -> text-delta
-//   tool.progress         {tool_name:"_thinking",delta} -> reasoning-delta
+//   reasoning.delta       {message_id,delta}            -> reasoning-delta
 //   tool.started          {tool_name,preview,args}      -> tool-input-start + tool-input-available
 //   tool.completed        {tool_name,preview}           -> tool-output-available
 //   tool.failed           {tool_name,preview}           -> tool-output-error
@@ -41,7 +41,6 @@ function parseJsonOr<T>(text: string, fallback: (raw: string) => T): T {
 }
 
 const TEXT_ID = "hermes-text"
-const THINKING = "_thinking"
 
 async function writeHermesSession(
   sse: ReadableStream<Uint8Array>,
@@ -82,6 +81,7 @@ async function writeHermesSession(
   }
   const writeReasoningDelta = (delta: string) => {
     if (!delta) return
+    if (!reasoningId && !delta.trim()) return
     if (textOpen) closeTextIfOpen()
     if (!reasoningId) {
       reasoningId = `hermes-reasoning-${reasoningCount++}`
@@ -164,8 +164,11 @@ async function writeHermesSession(
         writeTextDelta(str(data.delta))
         break
       }
-      case "tool.progress": {
-        if (data.tool_name === THINKING) writeReasoningDelta(str(data.delta))
+      // `tool.progress` `_thinking` carries the model's text preview, not
+      // reasoning, and that text is already streamed as assistant.delta, so it
+      // is ignored. `reasoning.delta` is the real reasoning stream.
+      case "reasoning.delta": {
+        writeReasoningDelta(str(data.delta))
         break
       }
       case "tool.started": {

@@ -149,31 +149,50 @@ export async function POST(req: Request) {
 
 ${canvasSystemPromptAddendum(canvasId ? canvasTitle : undefined)}`
 
-    // Everything from here on is the turn itself, and it is now interruptible:
-    // `beginRun` also aborts whatever was still running for this chat, so a
-    // second question asked mid-answer replaces the first instead of racing it
-    // (two turns on one `X-Hermes-Session-Key` is what wedged the session and
-    // left the chat unable to answer anything at all).
-    const run = beginRun(chatId)
+    // Everything from here on is the turn itself, and it is interruptible.
+    // `beginRun` queues behind whatever is still running for this chat: two
+    // turns on one `X-Hermes-Session-Key` is what wedged the session and left
+    // the chat unable to answer anything at all.
+    const run = await beginRun(chatId)
+    if (req.signal.aborted) {
+      // The client left while queued; do not start a turn nobody will read.
+      endRun(chatId, run)
+      return new Response(null, { status: 499 })
+    }
 
     // The chat's Hermes session holds the conversation, so only the newest
     // message is sent.
     const sessionId = await ensureHermesSession(chatId)
-    const hermesRes = await hermesRequest({
-      message: userMessage,
-      model,
-      chatId,
-      sessionId,
-      systemPrompt: effectiveSystemPrompt,
-      reasoningEffort: effort,
-      // What makes Stop mean stop: aborting this cancels the request to
-      // Hermes, which ends the SSE below, which runs onFinish -- so the
-      // partial answer is saved and the database matches the screen.
-      signal: run.controller.signal,
-    }).catch((err) => {
+    const send = () =>
+      hermesRequest({
+        message: userMessage,
+        model,
+        chatId,
+        sessionId,
+        systemPrompt: effectiveSystemPrompt,
+        reasoningEffort: effort,
+        // What makes Stop mean stop: aborting this cancels the request to
+        // Hermes, which ends the SSE below, which runs onFinish -- so the
+        // partial answer is saved and the database matches the screen.
+        signal: run.controller.signal,
+      })
+    // Hermes can hold the session lease for a moment after the previous
+    // stream ends and answers 409 until it is released.
+    let hermesRes: Response
+    try {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          hermesRes = await send()
+          break
+        } catch (err) {
+          if (attempt >= 3 || !String(err).includes("failed (409)")) throw err
+          await new Promise((r) => setTimeout(r, 500))
+        }
+      }
+    } catch (err) {
       endRun(chatId, run)
       throw err
-    })
+    }
 
     const stream = hermesSessionStreamToUIMessageStream(
       hermesRes.body as ReadableStream<Uint8Array>,
