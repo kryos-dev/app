@@ -91,6 +91,13 @@ async function writeHermesSession(
   }
   const writeTextDelta = (delta: string) => {
     if (!delta) return
+    // Leading whitespace is dropped from the stream (but kept in `segment` so
+    // the final content still matches): opening a text part for it would hide
+    // the loader while nothing visible is drawn.
+    if (!textOpen && !delta.trim()) {
+      segment += delta
+      return
+    }
     closeReasoningIfOpen()
     if (!textOpen) {
       writer.write({ type: "text-start", id: TEXT_ID })
@@ -199,7 +206,7 @@ async function writeHermesSession(
         break
       }
       case "assistant.commentary": {
-        if (data.already_streamed === false && str(data.text)) {
+        if (data.already_streamed === false && str(data.text).trim()) {
           closeTextIfOpen()
           writeTextPart(str(data.text))
         }

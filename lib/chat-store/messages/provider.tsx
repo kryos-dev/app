@@ -17,7 +17,10 @@ interface MessagesContextType {
   isLoading: boolean
   setMessages: React.Dispatch<React.SetStateAction<ZolaUIMessage[]>>
   refresh: () => Promise<void>
-  cacheAndAddMessage: (message: ZolaUIMessage) => Promise<void>
+  cacheAndAddMessage: (
+    message: ZolaUIMessage,
+    chatIdAtSend?: string | null
+  ) => Promise<void>
   resetMessages: () => Promise<void>
   deleteMessages: () => Promise<void>
 }
@@ -45,6 +48,10 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!chatId) return
+
+    // Drop the previous chat's messages at once; the load below refills them.
+    setMessages([])
+    setIsLoading(true)
 
     // Every write here is guarded by `cancelled`, the way poll() already was.
     // Without it a load for the chat you just left finishes second and writes
@@ -113,8 +120,11 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const cacheAndAddMessage = async (message: ZolaUIMessage) => {
-    if (!chatId) return
+  const cacheAndAddMessage = async (
+    message: ZolaUIMessage,
+    chatIdAtSend: string | null = chatId
+  ) => {
+    if (!chatId || chatIdAtSend !== chatId) return
 
     try {
       setMessages((prev) => {

@@ -159,3 +159,18 @@ const textOf = (message) =>
 }
 
 console.log("hermes-stream.test.mjs: all assertions passed")
+
+// --- Leading whitespace must not open a text part before real text arrives. ---
+{
+  const sse = frames([
+    ["assistant.delta", { delta: "\n" }],
+    ["assistant.delta", { delta: "Hello" }],
+    ["assistant.completed", { content: "\nHello" }],
+    ["run.completed", {}],
+  ])
+  const { chunks, message } = await run(sse)
+  const firstText = chunks.findIndex((c) => c.type === "text-start")
+  assert.ok(firstText >= 0)
+  assert.equal(chunks[firstText + 1].delta, "Hello", "no whitespace-only text chunk before Hello")
+  assert.equal(textOf(message), "Hello")
+}

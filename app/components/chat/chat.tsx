@@ -121,6 +121,7 @@ export function Chat() {
     handleInputChange,
   } = useChatCore({
     initialMessages,
+    isLoading: isMessagesLoading,
     draftValue,
     cacheAndAddMessage,
     chatId,

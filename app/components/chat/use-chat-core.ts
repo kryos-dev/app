@@ -21,7 +21,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 type UseChatCoreProps = {
   initialMessages: ZolaUIMessage[]
   draftValue: string
-  cacheAndAddMessage: (message: ZolaUIMessage) => void
+  isLoading: boolean
+  cacheAndAddMessage: (message: ZolaUIMessage, chatIdAtSend?: string | null) => void
   chatId: string | null
   user: UserProfile | null
   files: File[]
@@ -58,6 +59,7 @@ function textPart(text: string) {
 
 export function useChatCore({
   initialMessages,
+  isLoading,
   draftValue,
   cacheAndAddMessage,
   chatId,
@@ -156,6 +158,10 @@ export function useChatCore({
   }
   const chatInstanceId = chatInstanceIdRef.current
 
+  // Chat the in-flight request was sent for; the reply is cached under it,
+  // not under whatever chat is open when the reply finishes.
+  const sentChatIdRef = useRef<string | null>(chatId)
+
   // Initialize useChat
   const { messages, status, error, stop: rawStop, setMessages, sendMessage } =
     useChat<ZolaUIMessage>({
@@ -168,22 +174,11 @@ export function useChatCore({
       // work. The server side is untouched: deltas still leave the box as
       // they arrive, this only changes how often React paints them.
       throttle: 50,
-      // `id` keys the chat state and, with `resume`, is what the transport
-      // reconnects on: it GETs `${api}/${id}/stream` on mount. Without both of
-      // these an answer in flight was simply lost by navigating away -- the
-      // server finished and persisted it, and the browser never found out.
-      //
-      // Only when there IS a chat. On the home screen useChat invents a random
-      // id and `resume: true` then asked the server about a chat that does not
-      // exist; the uuid column rejected the id, the route answered 500, and
-      // every visit to the home page opened with "Failed to fetch the chat
-      // response.".
       id: chatInstanceId ?? undefined,
-      resume: !!chatInstanceId,
       messages: initialMessages,
       transport,
       onFinish: async ({ message }) => {
-        cacheAndAddMessage(message)
+        cacheAndAddMessage(message, sentChatIdRef.current)
         // The server generates the title AFTER it persists the reply, which is
         // after the stream this client was watching has already closed. So the
         // title lands some unknown moment later and nothing pushes it here.
@@ -247,18 +242,15 @@ export function useChatCore({
     // Mid-send the URL moves to /c/<new id> before submit() has claimed the
     // chat; loading that chat's (empty) history here wiped the question.
     if (creatingChatRef.current) return
-    const chatChanged = loadedChatIdRef.current !== chatId
-    // The provider loads the cache first (possibly stale: user turn only when
-    // the user left mid-run) and the DB copy after; take any load that has
-    // more messages than the live state.
-    if (chatChanged || initialMessages.length > messages.length) {
-      loadedChatIdRef.current = chatId
-      setMessages(initialMessages)
-    }
+    // The provider clears on chat change and reports isLoading until the
+    // load lands; apply the loaded history as is once it has finished.
+    if (isLoading) return
+    loadedChatIdRef.current = chatId
+    setMessages(initialMessages)
     // `status` too: a load that lands mid-stream was skipped above and,
     // without re-running once the stream settles, never applied.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialMessages, chatId, status])
+  }, [initialMessages, chatId, status, isLoading])
 
   // Handle search params on mount
   useEffect(() => {
@@ -359,6 +351,7 @@ export function useChatCore({
       // snapshot of `messages` is throttled (50ms) but `status` is not, so the
       // remove landed first and the "submitted" render had no user message:
       // a blank chat (brand-new chat) or a vanished question (existing one).
+      sentChatIdRef.current = currentChatId
       void sendMessage(
         {
           text: submittedInput,
@@ -463,6 +456,7 @@ export function useChatCore({
         prevChatIdRef.current = currentChatId
 
         // In place, not remove + push: see submit().
+        sentChatIdRef.current = currentChatId
         void sendMessage(
           { text: suggestion, messageId: optimisticId, metadata: optimisticMessage.metadata },
           {
