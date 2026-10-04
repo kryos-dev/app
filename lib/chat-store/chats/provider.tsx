@@ -1,17 +1,30 @@
 "use client"
 
 import { toast } from "@/components/ui/toast"
-import { createContext, useContext, useEffect, useMemo, useState } from "react"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { MODEL_DEFAULT, SYSTEM_PROMPT_DEFAULT } from "../../config"
+import type { RunStatus } from "../../runs"
 import type { Chats } from "../types"
 import {
   createNewChat as createNewChatFromDb,
   deleteChat as deleteChatFromDb,
   fetchAndCacheChats,
   getCachedChats,
+  pollChats,
   updateChatModel as updateChatModelFromDb,
   updateChatTitle,
 } from "./api"
+import { mergeChats } from "./merge"
+
+const CHATS_POLL_INTERVAL_MS = 2000
 
 interface ChatsContextType {
   chats: Chats[]
@@ -41,6 +54,9 @@ interface ChatsContextType {
   moveChatToProject: (id: string, projectId: string | null) => Promise<void>
   setChatPublic: (id: string, isPublic: boolean) => Promise<void>
   pinnedChats: Chats[]
+  /** Optimistically set a chat's sidebar dot from the mounted view (submit /
+   *  finish / error), ahead of the server's 2s status poll. */
+  setChatRunStatus: (id: string, status: RunStatus) => void
 }
 const ChatsContext = createContext<ChatsContextType | null>(null)
 
@@ -60,6 +76,26 @@ export function ChatsProvider({
   const [isLoading, setIsLoading] = useState(true)
   const [chats, setChats] = useState<Chats[]>([])
 
+  // Chats the mounted view optimistically marked (running on submit, complete
+  // or failed on finish/error). Their status is newer than anything the server
+  // has reported yet, so the poll must not erase it; once the server confirms
+  // a status the guard is dropped.
+  const optimisticRunStatus = useRef(new Set<string>())
+
+  const applyFresh = useCallback((fresh: Chats[]) => {
+    for (const chat of fresh) {
+      if (chat.run_status) optimisticRunStatus.current.delete(chat.id)
+    }
+    setChats((prev) => mergeChats(prev, fresh, optimisticRunStatus.current))
+  }, [])
+
+  const setChatRunStatus = useCallback((id: string, status: RunStatus) => {
+    optimisticRunStatus.current.add(id)
+    setChats((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, run_status: status } : c))
+    )
+  }, [])
+
   useEffect(() => {
     if (!userId) return
 
@@ -70,20 +106,38 @@ export function ChatsProvider({
 
       try {
         const fresh = await fetchAndCacheChats(userId)
-        setChats(fresh)
+        applyFresh(fresh)
       } finally {
         setIsLoading(false)
       }
     }
 
     load()
-  }, [userId])
+  }, [userId, applyFresh])
+
+  // The sidebar dots follow the server while any chat is running; with none
+  // running there is nothing to poll and the interval stops. The mounted
+  // view's optimistic update starts the poll the moment a turn is submitted,
+  // so it covers the gap until the server reports the run itself.
+  const anyChatRunning = useMemo(
+    () => chats.some((c) => c.run_status === "running"),
+    [chats]
+  )
+  useEffect(() => {
+    if (!userId || !anyChatRunning) return
+    const timer = setInterval(() => {
+      void pollChats(userId).then((fresh) => {
+        if (fresh) applyFresh(fresh)
+      })
+    }, CHATS_POLL_INTERVAL_MS)
+    return () => clearInterval(timer)
+  }, [userId, anyChatRunning, applyFresh])
 
   const refresh = async () => {
     if (!userId) return
 
     const fresh = await fetchAndCacheChats(userId)
-    setChats(fresh)
+    applyFresh(fresh)
   }
 
   const updateTitle = async (id: string, title: string) => {
@@ -292,6 +346,7 @@ export function ChatsProvider({
         moveChatToProject,
         setChatPublic,
         pinnedChats,
+        setChatRunStatus,
       }}
     >
       {children}

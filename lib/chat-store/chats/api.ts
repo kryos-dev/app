@@ -9,6 +9,15 @@ export async function getChatsForUserInDb(_userId: string): Promise<Chats[]> {
   return res.json()
 }
 
+/** The light poll behind the sidebar dots: fresh statuses without the
+ *  IndexedDB write that `fetchAndCacheChats` does every call. Null on any
+ *  failure so the poll keeps whatever the store already has. */
+export async function pollChats(_userId: string): Promise<Chats[] | null> {
+  const res = await fetchClient(API_ROUTE_CHATS)
+  if (!res.ok) return null
+  return res.json()
+}
+
 export async function updateChatTitleInDb(id: string, title: string) {
   const res = await fetchClient(`${API_ROUTE_CHATS}/${id}`, {
     method: "PATCH",

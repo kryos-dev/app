@@ -5,7 +5,7 @@ import { SYSTEM_PROMPT_DEFAULT } from "@/lib/config"
 import { projectContext } from "@/lib/projects/context"
 import { ensureHermesSession, hermesRequest } from "@/lib/hermes/client"
 import { hermesSessionStreamToUIMessageStream } from "@/lib/hermes/stream"
-import { beginRun, endRun } from "@/lib/runs"
+import { beginRun, discardRun, endRun } from "@/lib/runs"
 import { THINKING_EFFORTS, THINKING_EFFORT_DEFAULT } from "@/lib/thinking-effort"
 import { getCurrentUser } from "@/lib/auth"
 import { db, schema } from "@/lib/db"
@@ -214,7 +214,7 @@ ${canvasSystemPromptAddendum(canvasId ? canvasTitle : undefined)}`
     const run = await beginRun(chatId)
     if (req.signal.aborted) {
       // The client left while queued; do not start a turn nobody will read.
-      endRun(chatId, run)
+      discardRun(chatId, run)
       return new Response(null, { status: 499 })
     }
 
@@ -229,7 +229,7 @@ ${canvasSystemPromptAddendum(canvasId ? canvasTitle : undefined)}`
       )
       assistantId = Number(row.id)
     } catch (err) {
-      endRun(chatId, run)
+      endRun(chatId, run, "failed")
       throw err
     }
     const send = () =>
@@ -259,7 +259,7 @@ ${canvasSystemPromptAddendum(canvasId ? canvasTitle : undefined)}`
         }
       }
     } catch (err) {
-      endRun(chatId, run)
+      endRun(chatId, run, "failed")
       throw err
     }
 
@@ -275,7 +275,7 @@ ${canvasSystemPromptAddendum(canvasId ? canvasTitle : undefined)}`
       })
     } catch (err) {
       run.controller.abort()
-      endRun(chatId, run)
+      endRun(chatId, run, "failed")
       throw err
     }
 
@@ -303,9 +303,10 @@ ${canvasSystemPromptAddendum(canvasId ? canvasTitle : undefined)}`
             controller.enqueue(chunk)
           },
           // The run ends after its last chunk was recorded and the reply row
-          // saved (the stream only closes once that write is done).
+          // saved (the stream only closes once that write is done); that is
+          // the turn completing, which is what the sidebar dot reports.
           flush() {
-            endRun(chatId, run)
+            endRun(chatId, run, "complete")
           },
         })
       ),

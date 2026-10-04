@@ -56,7 +56,7 @@ type ChatViewProps = {
 
 export function ChatView({ chatKey, exists, history, pending }: ChatViewProps) {
   const { chatId } = useChatSession()
-  const { createNewChat, getChatById, updateChatModel, bumpChat, refresh } = useChats()
+  const { createNewChat, getChatById, updateChatModel, bumpChat, refresh, setChatRunStatus } = useChats()
   const { user } = useUser()
   const { preferences } = useUserPreferences()
   const { draftValue, clearDraft, setDraftValue } = useChatDraft(chatId)
@@ -116,7 +116,10 @@ export function ChatView({ chatKey, exists, history, pending }: ChatViewProps) {
     onFinish: () => {
       reconnectAttempts.current = 0
       reconnecting.current = false
-      // The title was set when the turn started; one refresh shows it.
+      // The turn completed: the sidebar dot turns green before the 2s status
+      // poll catches up. The title was set when the turn started; refresh
+      // shows it.
+      setChatRunStatus(chatKey, "complete")
       void refresh()
     },
     onError: (error) => {
@@ -133,8 +136,12 @@ export function ChatView({ chatKey, exists, history, pending }: ChatViewProps) {
           setInput((current) => current || unanswered)
           setDraftValue(unanswered)
         }
+        // The dot stays amber (the turn is still running on the server) while
+        // reconnects are recoverable; only retry exhaustion marks it failed.
         return scheduleReconnect()
       }
+      // A terminal error: the turn is over and it did not complete.
+      setChatRunStatus(chatKey, "failed")
       const message = error.message
       toast({
         title:
@@ -179,6 +186,7 @@ export function ChatView({ chatKey, exists, history, pending }: ChatViewProps) {
     const attempt = reconnectAttempts.current
     if (attempt >= RECONNECT_DELAYS.length) {
       reconnecting.current = false
+      setChatRunStatus(chatKey, "failed")
       toast({ title: "Connection lost. Please try again.", status: "error" })
       return
     }
@@ -259,6 +267,9 @@ export function ChatView({ chatKey, exists, history, pending }: ChatViewProps) {
         filename: a.name,
         url: a.url,
       }))
+      // The turn is on the wire: the sidebar dot turns amber at once, ahead of
+      // the 2s status poll; onFinish/onError move it to green/red.
+      setChatRunStatus(chatKey, "running")
       void sendMessage(
         { text, files: fileParts },
         {

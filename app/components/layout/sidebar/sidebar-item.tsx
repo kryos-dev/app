@@ -5,6 +5,7 @@ import { Chat } from "@/lib/chat-store/types"
 import { Check, X } from "@phosphor-icons/react"
 import Link from "next/link"
 import { useCallback, useMemo, useRef, useState } from "react"
+import { RunStatusDot } from "./run-status-dot"
 import { SidebarItemMenu } from "./sidebar-item-menu"
 
 type SidebarItemProps = {
@@ -153,6 +154,7 @@ export function SidebarItem({ chat, currentChatId }: SidebarItemProps) {
               onClick={handleLinkClick}
               title={displayTitle}
             >
+              <RunStatusDot status={chat.run_status} />
               <span className="truncate">{displayTitle}</span>
             </Link>
           </SidebarMenuButton>

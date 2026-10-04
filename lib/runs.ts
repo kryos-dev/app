@@ -18,12 +18,19 @@
  * A second send for the same chat waits for the running turn to end, because
  * Hermes allows one turn per session at a time.
  *
- * ponytail: a module-level Map, because the box runs one Next process. If Zola
- * is ever scaled past one instance the abort has to reach the instance holding
- * the run through shared state.
+ * Every run also carries a status -- running, complete or failed -- which is
+ * what the sidebar dots read. The terminal status survives `endRun` until the
+ * chat's next `beginRun`, so a finished turn keeps its green/red dot instead of
+ * blinking out the moment the stream closes. It lives in this module too (a
+ * module-level Map), because the box runs one Next process. If Zola is ever
+ * scaled past one instance the status has to reach the instance holding the
+ * run through shared state.
  */
 
 import type { UIMessageChunk } from "ai"
+
+/** The state of a chat's most recent turn, shown as a dot in the sidebar. */
+export type RunStatus = "running" | "complete" | "failed"
 
 type Run = {
   controller: AbortController
@@ -38,6 +45,10 @@ type Run = {
 }
 
 const runs = new Map<string, Run>()
+
+// A chat's most recent turn status. A terminal status is kept after `endRun`
+// removes the run so the sidebar can still show it; `beginRun` replaces it.
+const statuses = new Map<string, RunStatus>()
 
 // The chunks of one turn are kept so a client whose connection dropped can
 // reattach: it gets the buffer replayed, then the rest as it is produced.
@@ -93,6 +104,7 @@ export async function beginRun(chatId: string): Promise<Run> {
     subscribe: buffer.subscribe,
   }
   runs.set(chatId, run)
+  statuses.set(chatId, "running")
   return run
 }
 
@@ -104,6 +116,12 @@ export function getRun(chatId: string): Run | undefined {
 /** Whether a turn is currently running for the chat. */
 export function hasRun(chatId: string): boolean {
   return runs.has(chatId)
+}
+
+/** The state of the chat's most recent turn; undefined when none has run in
+ *  this process's lifetime. The terminal state survives the run being removed. */
+export function getRunStatus(chatId: string): RunStatus | undefined {
+  return statuses.get(chatId)
 }
 
 /**
@@ -118,9 +136,29 @@ export function abortRun(chatId: string): boolean {
   return true
 }
 
-/** Stop tracking a turn, but only if `run` is still the current one. */
-export function endRun(chatId: string, run: Run): void {
-  if (runs.get(chatId) === run) runs.delete(chatId)
+/**
+ * Stop tracking a turn, but only if `run` is still the current one. Records
+ * the turn's terminal status -- complete or failed -- which is preserved until
+ * the chat's next `beginRun`.
+ */
+export function endRun(chatId: string, run: Run, status: RunStatus): void {
+  if (runs.get(chatId) === run) {
+    runs.delete(chatId)
+    statuses.set(chatId, status)
+  }
+  run.finish()
+}
+
+/**
+ * End a run that never produced a turn (a queued send whose client left before
+ * it started). No terminal status is recorded, so the chat shows no dot for a
+ * turn that never ran.
+ */
+export function discardRun(chatId: string, run: Run): void {
+  if (runs.get(chatId) === run) {
+    runs.delete(chatId)
+    statuses.delete(chatId)
+  }
   run.finish()
 }
 

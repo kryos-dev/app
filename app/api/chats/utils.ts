@@ -1,4 +1,5 @@
 import { db, schema } from "@/lib/db"
+import { getRunStatus } from "@/lib/runs"
 import { asc, eq } from "drizzle-orm"
 
 /** DB rows are camelCase; the client-side store types (and the rest of the
@@ -17,6 +18,10 @@ export function toChatDTO(chat: typeof schema.chats.$inferSelect) {
     pinned_at: chat.pinnedAt,
     created_at: chat.createdAt,
     updated_at: chat.updatedAt,
+    // The in-memory state of the chat's most recent turn (lib/runs.ts), not a
+    // DB column: the sidebar dots read this. Null when no turn has run in this
+    // process's lifetime.
+    run_status: getRunStatus(chat.id) ?? null,
   }
 }
 

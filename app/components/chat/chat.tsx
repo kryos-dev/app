@@ -34,10 +34,14 @@ function ChatSession({ chatKey, exists: existsAtMount }: { chatKey: string; exis
     queryKey: ["chat-messages", chatKey],
     queryFn: () => fetchChatMessages(chatKey),
     enabled: exists,
-    // Fetched once per mount and never kept: a revisit must not seed the chat
-    // with an old list.
-    gcTime: 0,
-    staleTime: Infinity,
+    // Keep the history for a few minutes so switching back to a chat this
+    // session already visited renders its rows immediately, without the
+    // loading skeleton. staleTime 0 still makes the cached rows stale on
+    // remount, so a refetch revalidates them (the comment below remounts
+    // ChatView when the result changes), which keeps the old behaviour of a
+    // revisit never trusting a cached list.
+    gcTime: 5 * 60 * 1000,
+    staleTime: 0,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   })
