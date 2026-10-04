@@ -11,10 +11,7 @@ import { Message } from "./message"
 type ConversationProps = {
   messages: ZolaUIMessage[]
   status?: "streaming" | "ready" | "submitted" | "error"
-  onEdit: (id: string, newText: string) => void
-  onReload: () => void
   onQuote?: (text: string, messageId: string) => void
-  isUserAuthenticated?: boolean
   // Header-height fade over the top of the list on phones. Off where the page
   // already pads for the app header, else it blanks the first message.
   topMask?: boolean
@@ -23,33 +20,16 @@ type ConversationProps = {
 export function Conversation({
   messages,
   status = "ready",
-  onEdit,
-  onReload,
   onQuote,
-  isUserAuthenticated,
   topMask = true,
 }: ConversationProps) {
   const initialMessageCount = useRef(messages.length)
 
   // Message is memoised on the fields that drive its output and the callbacks
-  // are deliberately not among them: submitEdit depends on `messages`, so it
-  // rebuilds on every streamed token and comparing it would re-render every
-  // finished message per token. But handleReload also rebuilds when the model,
-  // thinking rung, search or system prompt change, and the memo swallowed
-  // that -- Regenerate ran with whatever model was chosen a switch ago. Refs
-  // hand each Message a stable wrapper that always calls the newest one, the
-  // way use-chat-core reaches handleReload through reloadRef.
-  const onEditRef = useRef(onEdit)
-  onEditRef.current = onEdit
-  const onReloadRef = useRef(onReload)
-  onReloadRef.current = onReload
+  // are deliberately not among them; a ref hands each Message a stable wrapper
+  // that always calls the newest one.
   const onQuoteRef = useRef(onQuote)
   onQuoteRef.current = onQuote
-  const stableOnEdit = useCallback(
-    (id: string, text: string) => onEditRef.current(id, text),
-    []
-  )
-  const stableOnReload = useCallback(() => onReloadRef.current(), [])
   const stableOnQuote = useCallback(
     (text: string, messageId: string) => onQuoteRef.current?.(text, messageId),
     []
@@ -100,13 +80,9 @@ export function Conversation({
                   variant={message.role}
                   parts={message.parts}
                   isLast={isLast}
-                  onEdit={stableOnEdit}
-                  onReload={stableOnReload}
                   hasScrollAnchor={hasScrollAnchor}
                   status={status}
                   onQuote={stableOnQuote}
-                  messageGroupId={message.metadata?.message_group_id ?? null}
-                  isUserAuthenticated={isUserAuthenticated}
                 />
               )
             })}

@@ -9,14 +9,10 @@ type MessageProps = {
   id: string
   parts: UIMessage["parts"]
   isLast?: boolean
-  onEdit: (id: string, newText: string) => Promise<void> | void
-  onReload: () => void
   hasScrollAnchor?: boolean
   status?: "streaming" | "ready" | "submitted" | "error"
   className?: string
   onQuote?: (text: string, messageId: string) => void
-  messageGroupId?: string | null
-  isUserAuthenticated?: boolean
 }
 
 function MessageImpl({
@@ -24,14 +20,10 @@ function MessageImpl({
   id,
   parts,
   isLast,
-  onEdit,
-  onReload,
   hasScrollAnchor,
   status,
   className,
   onQuote,
-  messageGroupId,
-  isUserAuthenticated,
 }: MessageProps) {
   const [copied, setCopied] = useState(false)
   const text = textFromMessage({ parts })
@@ -47,14 +39,9 @@ function MessageImpl({
       <MessageUser
         copied={copied}
         copyToClipboard={copyToClipboard}
-        onReload={onReload}
-        onEdit={onEdit}
-        id={id}
         hasScrollAnchor={hasScrollAnchor}
         parts={parts}
         className={className}
-        messageGroupId={messageGroupId}
-        isUserAuthenticated={isUserAuthenticated}
       />
     )
   }
@@ -64,7 +51,6 @@ function MessageImpl({
       <MessageAssistant
         copied={copied}
         copyToClipboard={copyToClipboard}
-        onReload={onReload}
         isLast={isLast}
         hasScrollAnchor={hasScrollAnchor}
         parts={parts}
@@ -93,9 +79,7 @@ export const Message = React.memo(MessageImpl, (a, b) => {
   }
   return (
     a.className === b.className &&
-    a.hasScrollAnchor === b.hasScrollAnchor &&
-    a.messageGroupId === b.messageGroupId &&
-    a.isUserAuthenticated === b.isUserAuthenticated
+    a.hasScrollAnchor === b.hasScrollAnchor
   )
 })
 Message.displayName = "Message"

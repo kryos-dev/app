@@ -84,28 +84,11 @@ export function useChatOperations({
     [messages, setMessages]
   )
 
-  const handleEdit = useCallback(
-    (id: string, newText: string) => {
-      setMessages(
-        messages.map((message) =>
-          message.id === id
-            ? {
-                ...message,
-                parts: [{ type: "text" as const, text: newText }],
-              }
-            : message
-        )
-      )
-    },
-    [messages, setMessages]
-  )
-
   return {
     // Utils
     ensureChatExists,
 
     // Handlers
     handleDelete,
-    handleEdit,
   }
 }

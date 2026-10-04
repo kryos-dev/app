@@ -315,7 +315,7 @@ export function ProjectView({ projectId }: ProjectViewProps) {
     []
   )
 
-  const { messages, status, regenerate, stop, setMessages, sendMessage } =
+  const { messages, status, stop, setMessages, sendMessage } =
     useChat<ZolaUIMessage>({
       // Same as use-chat-core.ts: batch paints, or every token re-parses the
       // whole reply's markdown.
@@ -392,7 +392,7 @@ export function ProjectView({ projectId }: ProjectViewProps) {
     ]
   )
 
-  const { handleDelete, handleEdit } = useChatOperations({
+  const { handleDelete } = useChatOperations({
     isAuthenticated: true, // Always authenticated in project context
     chatId: null,
     messages,
@@ -513,32 +513,14 @@ export function ProjectView({ projectId }: ProjectViewProps) {
     enableSearch,
   ])
 
-  const handleReload = useCallback(async () => {
-    if (!user?.id) {
-      return
-    }
-
-    regenerate({
-      body: {
-        chatId: null,
-        userId: user.id,
-        model: selectedModel,
-        isAuthenticated: true,
-        systemPrompt: SYSTEM_PROMPT_DEFAULT,
-      },
-    })
-  }, [user, selectedModel, regenerate])
-
   // Memoize the conversation props to prevent unnecessary rerenders
   const conversationProps = useMemo(
     () => ({
       messages,
       status,
       onDelete: handleDelete,
-      onEdit: handleEdit,
-      onReload: handleReload,
     }),
-    [messages, status, handleDelete, handleEdit, handleReload]
+    [messages, status, handleDelete]
   )
 
   // Memoize the chat input props

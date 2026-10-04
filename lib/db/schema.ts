@@ -172,16 +172,18 @@ export const feedback = pgTable("feedback", {
 // `feedback` table above cannot express -- that one is free-text app feedback
 // with no message attached.
 //
-// Keyed on (message_id, user_id) so a second vote replaces the first instead of
+// Keyed on (message_ref, user_id) so a second vote replaces the first instead of
 // stacking, and so "what did this user think of this message" is a primary-key
 // lookup. rating is -1 or 1; clearing a vote deletes the row rather than
 // storing a third state nobody asked for.
 export const messageFeedback = pgTable(
   "message_feedback",
   {
-    messageId: integer("message_id")
+    // "12" for a row Zola stored, "h345" for a Hermes transcript row.
+    messageRef: text("message_ref").notNull(),
+    chatId: uuid("chat_id")
       .notNull()
-      .references(() => messages.id, { onDelete: "cascade" }),
+      .references(() => chats.id, { onDelete: "cascade" }),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -189,7 +191,7 @@ export const messageFeedback = pgTable(
     note: text("note"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
-  (table) => [primaryKey({ columns: [table.messageId, table.userId] })]
+  (table) => [primaryKey({ columns: [table.messageRef, table.userId] })]
 )
 
 export const canvases = pgTable("canvases", {

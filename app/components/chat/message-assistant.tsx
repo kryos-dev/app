@@ -16,7 +16,6 @@ import { isToolUIPart, type UIMessage } from "ai"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import {
-  ArrowClockwise,
   Check,
   Copy,
   FileText,
@@ -38,7 +37,6 @@ type MessageAssistantProps = {
   hasScrollAnchor?: boolean
   copied?: boolean
   copyToClipboard?: () => void
-  onReload?: () => void
   status?: "streaming" | "ready" | "submitted" | "error"
   className?: string
   messageId: string
@@ -51,7 +49,6 @@ export function MessageAssistant({
   hasScrollAnchor,
   copied,
   copyToClipboard,
-  onReload,
   status,
   className,
   messageId,
@@ -173,8 +170,8 @@ export function MessageAssistant({
               // Visible by default, hover-revealed only from md up.
               //
               // This row was `opacity-0 group-hover:opacity-100` at every width,
-              // and a touch screen has no hover -- so copy, canvas and
-              // regenerate were not merely hard to find on a phone, they were
+              // and a touch screen has no hover -- so copy and canvas
+              // were not merely hard to find on a phone, they were
               // unreachable. The owner uses this on a phone almost exclusively.
               // Adding a thumbs button to a row nobody can see would not have
               // shipped a feature.
@@ -199,16 +196,6 @@ export function MessageAssistant({
               <FileText className="size-4" />
             </MessageAction>
             <ReadAloudAction text={answerText} />
-            {isLast ? (
-              <MessageAction
-                tooltip="Regenerate"
-                label="Regenerate"
-                className="hover:bg-accent/60 text-muted-foreground hover:text-foreground rounded-full bg-transparent"
-                onClick={onReload}
-              >
-                <ArrowClockwise className="size-4" />
-              </MessageAction>
-            ) : null}
             <MessageFeedback messageId={messageId} />
           </MessageActions>
         )}

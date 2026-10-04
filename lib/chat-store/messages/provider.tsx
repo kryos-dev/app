@@ -9,7 +9,6 @@ import {
   clearMessagesForChat,
   getCachedMessages,
   getMessagesFromDb,
-  setMessages as saveMessages,
   type ZolaUIMessage,
 } from "./api"
 
@@ -18,7 +17,6 @@ interface MessagesContextType {
   isLoading: boolean
   setMessages: React.Dispatch<React.SetStateAction<ZolaUIMessage[]>>
   refresh: () => Promise<void>
-  saveAllMessages: (messages: ZolaUIMessage[]) => Promise<void>
   cacheAndAddMessage: (message: ZolaUIMessage) => Promise<void>
   resetMessages: () => Promise<void>
   deleteMessages: () => Promise<void>
@@ -66,7 +64,8 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
         setMessages(fresh)
         cacheMessages(chatId, fresh)
         // A user message with no reply yet means a run is still going on the
-        // server (we left the page mid-stream); poll until the reply lands.
+        // server (we left the page mid-stream); poll until the reply lands in
+        // the Hermes transcript.
         if (fresh.at(-1)?.role === "user") poll()
       } catch (error) {
         if (!cancelled) console.error("Failed to fetch messages:", error)
@@ -128,18 +127,6 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const saveAllMessages = async (newMessages: ZolaUIMessage[]) => {
-    // @todo: manage the case where the chatId is null (first time the user opens the chat)
-    if (!chatId) return
-
-    try {
-      await saveMessages(chatId, newMessages)
-      setMessages(newMessages)
-    } catch {
-      toast({ title: "Failed to save messages", status: "error" })
-    }
-  }
-
   const deleteMessages = async () => {
     if (!chatId) return
 
@@ -158,7 +145,6 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         setMessages,
         refresh,
-        saveAllMessages,
         cacheAndAddMessage,
         resetMessages,
         deleteMessages,

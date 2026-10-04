@@ -1,7 +1,7 @@
-import { toMessageDTO } from "@/app/api/chats/utils"
+import { loadChatMessages } from "@/app/api/chats/utils"
 import { APP_DOMAIN } from "@/lib/config"
 import { db, schema } from "@/lib/db"
-import { and, asc, eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import type { Metadata } from "next"
 import { redirect } from "next/navigation"
 import Article from "./article"
@@ -57,15 +57,11 @@ export default async function ShareChat({
     redirect("/")
   }
 
-  const messagesData = await db
-    .select()
-    .from(schema.messages)
-    .where(eq(schema.messages.chatId, chatId))
-    .orderBy(asc(schema.messages.createdAt))
+  const messagesData = await loadChatMessages(chatId)
 
   return (
     <Article
-      messages={messagesData.map(toMessageDTO) as never}
+      messages={messagesData as never}
       date={(chatData.createdAt || new Date()).toString()}
       title={chatData.title || ""}
       subtitle={"A conversation in Zola"}

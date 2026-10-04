@@ -8,7 +8,6 @@ import { readFromIndexedDB, writeToIndexedDB } from "../persist"
 // UIMessage/metadata must stay JSON-serialisable.
 export type ZolaMessageMetadata = {
   createdAt?: string
-  message_group_id?: string
   model?: string
 }
 
@@ -26,14 +25,12 @@ type DbMessage = {
   experimental_attachments?: DbAttachment[] | null
   created_at: string | null
   parts?: ZolaUIMessage["parts"] | null
-  message_group_id?: string | null
   model?: string | null
 }
 
-// User rows never get a `parts` column written (see app/api/chat/api.ts
-// logUserMessage); assistant rows always do (app/api/chat/db.ts). Synthesize
-// parts for whichever rows don't have them so every ZolaUIMessage is
-// parts-only, per the v5 UIMessage shape.
+// Rows Zola stored before chats moved to Hermes sessions have no `parts`
+// column for user turns. Synthesize parts for whichever rows don't have them
+// so every ZolaUIMessage is parts-only, per the v5 UIMessage shape.
 type LegacyToolPart = {
   type: "tool-invocation"
   toolInvocation: {
@@ -104,7 +101,6 @@ function fromDbMessage(message: DbMessage): ZolaUIMessage {
     parts: partsFromDbMessage(message),
     metadata: {
       createdAt: message.created_at ?? undefined,
-      message_group_id: message.message_group_id ?? undefined,
       model: message.model ?? undefined,
     },
   }
@@ -137,59 +133,12 @@ export function attachmentsFromMessage(
     }))
 }
 
-export async function getMessagesFromDb(
-  chatId: string,
-  limit?: number
-): Promise<ZolaUIMessage[]> {
-  const qs = limit ? `?limit=${limit}` : ""
-  const res = await fetchClient(`${API_ROUTE_CHATS}/${chatId}/messages${qs}`)
+export async function getMessagesFromDb(chatId: string): Promise<ZolaUIMessage[]> {
+  const res = await fetchClient(`${API_ROUTE_CHATS}/${chatId}/messages`)
   if (!res.ok) return []
 
   const data: DbMessage[] = await res.json()
   return data.map(fromDbMessage)
-}
-
-// Runs after EVERY turn. It used to fetch the entire conversation and slice
-// two rows off the end in JavaScript, so a 500-message chat downloaded and
-// parsed 500 rows to read 2 -- and got slower with every reply. The tail is
-// now cut in SQL.
-export async function getLastMessagesFromDb(
-  chatId: string,
-  limit: number = 2
-): Promise<ZolaUIMessage[]> {
-  return getMessagesFromDb(chatId, limit)
-}
-
-async function insertMessageToDb(chatId: string, message: ZolaUIMessage) {
-  await fetchClient(`${API_ROUTE_CHATS}/${chatId}/messages`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      role: message.role,
-      content: textFromMessage(message),
-      experimental_attachments: attachmentsFromMessage(message),
-      createdAt: message.metadata?.createdAt,
-      message_group_id: message.metadata?.message_group_id || null,
-      model: message.metadata?.model || null,
-    }),
-  })
-}
-
-async function insertMessagesToDb(chatId: string, messages: ZolaUIMessage[]) {
-  await fetchClient(`${API_ROUTE_CHATS}/${chatId}/messages`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      messages: messages.map((message) => ({
-        role: message.role,
-        content: textFromMessage(message),
-        experimental_attachments: attachmentsFromMessage(message),
-        createdAt: message.metadata?.createdAt,
-        message_group_id: message.metadata?.message_group_id || null,
-        model: message.metadata?.model || null,
-      })),
-    }),
-  })
 }
 
 async function deleteMessagesFromDb(chatId: string) {
@@ -224,25 +173,6 @@ export async function cacheMessages(
   chatId: string,
   messages: ZolaUIMessage[]
 ): Promise<void> {
-  await writeToIndexedDB("messages", { id: chatId, messages })
-}
-
-export async function addMessage(
-  chatId: string,
-  message: ZolaUIMessage
-): Promise<void> {
-  await insertMessageToDb(chatId, message)
-  const current = await getCachedMessages(chatId)
-  const updated = [...current, message]
-
-  await writeToIndexedDB("messages", { id: chatId, messages: updated })
-}
-
-export async function setMessages(
-  chatId: string,
-  messages: ZolaUIMessage[]
-): Promise<void> {
-  await insertMessagesToDb(chatId, messages)
   await writeToIndexedDB("messages", { id: chatId, messages })
 }
 

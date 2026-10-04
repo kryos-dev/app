@@ -118,11 +118,7 @@ export function useChatCore({
   const prompt = searchParams.get("prompt")
 
   // Chats operations
-  const { updateTitle, refresh: refreshChats } = useChats()
-
-  // handleReload is defined further down, and this callback must not rebuild
-  // every time it changes, so the retry goes through a ref.
-  const reloadRef = useRef<() => void>(() => {})
+  const { refresh: refreshChats } = useChats()
 
   // Handle errors directly in onError callback
   const handleError = useCallback((error: Error) => {
@@ -134,14 +130,7 @@ export function useChatCore({
       errorMsg = "Something went wrong. Please try again."
     }
 
-    toast({
-      title: errorMsg,
-      status: "error",
-      // A failed turn used to be a dead end: the toast said what broke and
-      // left re-sending the message as the only way forward. Carry the retry
-      // on the error itself.
-      button: { label: "Try again", onClick: () => reloadRef.current() },
-    })
+    toast({ title: errorMsg, status: "error" })
   }, [])
 
   const transport = useMemo(
@@ -168,7 +157,7 @@ export function useChatCore({
   const chatInstanceId = chatInstanceIdRef.current
 
   // Initialize useChat
-  const { messages, status, error, regenerate, stop: rawStop, setMessages, sendMessage } =
+  const { messages, status, error, stop: rawStop, setMessages, sendMessage } =
     useChat<ZolaUIMessage>({
       // Batch UI updates to one render per ~50ms. Without this every SSE delta
       // (Hermes sends them per token) re-renders the whole assistant message
@@ -221,9 +210,9 @@ export function useChatCore({
               : null)
 
           if (!effectiveChatId) return
-          await syncRecentMessages(effectiveChatId, setMessages, 2)
+          await syncRecentMessages(effectiveChatId, setMessages)
         } catch (error) {
-          console.error("Message ID reconciliation failed: ", error)
+          console.error("Message sync failed: ", error)
         }
       },
       onError: handleError,
@@ -439,146 +428,6 @@ export function useChatCore({
     activeCanvas,
   ])
 
-  const submitEdit = useCallback(
-    async (messageId: string, newContent: string) => {
-      // Block edits while sending/streaming
-      if (isSubmitting || status === "submitted" || status === "streaming") {
-        toast({
-          title: "Please wait until the current message finishes sending.",
-          status: "error",
-        })
-        return
-      }
-
-      if (!newContent.trim()) return
-
-      if (!chatId) {
-        toast({ title: "Missing chat.", status: "error" })
-        return
-      }
-
-      // Find edited message
-      const editIndex = messages.findIndex(
-        (m) => String(m.id) === String(messageId)
-      )
-      if (editIndex === -1) {
-        toast({ title: "Message not found", status: "error" })
-        return
-      }
-
-      const target = messages[editIndex]
-      // The server deletes from this timestamp, so without it there is no edit
-      // to make. It used to return silently on a console.error, which from the
-      // chat looks like the Send button doing nothing at all -- say so instead.
-      const cutoffIso = target?.metadata?.createdAt
-      if (!cutoffIso) {
-        toast({
-          title: "Can't edit this message yet",
-          description: "It hasn't finished saving. Try again in a moment.",
-          status: "error",
-        })
-        return
-      }
-
-      if (newContent.length > MESSAGE_MAX_LENGTH) {
-        toast({
-          title: `The message you submitted was too long, please submit something shorter. (Max ${MESSAGE_MAX_LENGTH} characters)`,
-          status: "error",
-        })
-        return
-      }
-
-      // Store original messages for potential rollback
-      const originalMessages = [...messages]
-      const targetAttachments = target.parts.filter((p) => p.type === "file")
-
-      const optimisticId = `optimistic-edit-${Date.now().toString()}`
-      const optimisticEditedMessage: ZolaUIMessage = {
-        id: optimisticId,
-        role: "user",
-        parts: [textPart(newContent), ...targetAttachments],
-        metadata: { createdAt: new Date().toISOString() },
-      }
-
-      try {
-        const trimmedMessages = messages.slice(0, editIndex)
-        setMessages([...trimmedMessages, optimisticEditedMessage])
-
-        try {
-          const { writeToIndexedDB } = await import("@/lib/chat-store/persist")
-          await writeToIndexedDB("messages", {
-            id: chatId,
-            messages: trimmedMessages,
-          })
-        } catch {}
-
-        // Get user validation
-        const uid = await getOrCreateGuestUserId(user)
-        if (!uid) {
-          setMessages(originalMessages)
-          toast({ title: "Please sign in and try again.", status: "error" })
-          return
-        }
-
-        const currentChatId = await ensureChatExists(uid, newContent)
-        loadedChatIdRef.current = currentChatId
-        if (!currentChatId) {
-          setMessages(originalMessages)
-          return
-        }
-
-        prevChatIdRef.current = currentChatId
-
-        // If this is an edit of the very first user message, update chat title
-        if (editIndex === 0 && target.role === "user") {
-          try {
-            await updateTitle(currentChatId, newContent)
-          } catch {}
-        }
-
-        sendMessage(
-          {
-            text: newContent,
-            files: targetAttachments as FileUIPart[],
-          },
-          {
-            body: {
-              chatId: currentChatId,
-              userId: uid,
-              model: selectedModel,
-              isAuthenticated,
-              systemPrompt: systemPrompt || SYSTEM_PROMPT_DEFAULT,
-              reasoningEffort,
-              editCutoffTimestamp: cutoffIso, // Backend will delete messages from this timestamp
-            },
-          }
-        )
-
-        bumpChat(currentChatId)
-      } catch (error) {
-        console.error("Edit failed:", error)
-        setMessages(originalMessages)
-        toast({ title: "Failed to apply edit", status: "error" })
-      }
-    },
-    [
-      chatId,
-      messages,
-      user,
-      ensureChatExists,
-      selectedModel,
-      isAuthenticated,
-      systemPrompt,
-      sendMessage,
-      setMessages,
-      bumpChat,
-      updateTitle,
-      isSubmitting,
-      status,
-      reasoningEffort,
-    ]
-  )
-
   // Handle suggestion
   const handleSuggestion = useCallback(
     async (suggestion: string) => {
@@ -655,42 +504,6 @@ export function useChatCore({
     ]
   )
 
-  // Handle reload
-  const handleReload = useCallback(async () => {
-    const uid = await getOrCreateGuestUserId(user)
-    if (!uid) {
-      return
-    }
-
-    // Same body the send path builds. reasoningEffort was
-    // missing here, so a retry quietly ran with search off and at the default
-    // thinking rung -- a different question than the one that failed, which is
-    // the worst thing a retry can be.
-    regenerate({
-      body: {
-        chatId,
-        userId: uid,
-        model: selectedModel,
-        isAuthenticated,
-        systemPrompt: systemPrompt || SYSTEM_PROMPT_DEFAULT,
-        reasoningEffort,
-      },
-    })
-  }, [
-    user,
-    chatId,
-    selectedModel,
-    isAuthenticated,
-    systemPrompt,
-    regenerate,
-    reasoningEffort,
-  ])
-
-  // The error toast's "Try again" reaches handleReload through this.
-  useEffect(() => {
-    reloadRef.current = handleReload
-  }, [handleReload])
-
   // Handle input change
   const { setDraftValue } = useChatDraft(chatId)
   const handleInputChange = useCallback(
@@ -724,8 +537,6 @@ export function useChatCore({
     // Actions
     submit,
     handleSuggestion,
-    handleReload,
     handleInputChange,
-    submitEdit,
   }
 }

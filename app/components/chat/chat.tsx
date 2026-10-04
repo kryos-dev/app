@@ -118,9 +118,7 @@ export function Chat() {
     setReasoningEffort,
     submit,
     handleSuggestion,
-    handleReload,
     handleInputChange,
-    submitEdit,
   } = useChatCore({
     initialMessages,
     draftValue,
@@ -151,19 +149,13 @@ export function Chat() {
       // chat creation run first, and without this the question sat there with
       // no pending reply, looking like the send had been dropped.
       status: isSubmitting && status === "ready" ? ("submitted" as const) : status,
-      onEdit: submitEdit,
-      onReload: handleReload,
       onQuote: handleQuotedSelected,
-      isUserAuthenticated: isAuthenticated,
     }),
     [
       messages,
       status,
       isSubmitting,
-      submitEdit,
-      handleReload,
       handleQuotedSelected,
-      isAuthenticated,
     ]
   )
 
