@@ -35,6 +35,7 @@ import { MessageFeedback } from "./message-feedback"
 import { QuoteButton } from "./quote-button"
 import { ToolInvocation } from "./tool-invocation"
 import { turnFromParts } from "@/lib/turn"
+import { collapseRepeatedText } from "@/lib/parts"
 import { useAssistantMessageSelection } from "./useAssistantMessageSelection"
 import { isVisiblePart, useCopy } from "./utils"
 
@@ -144,7 +145,10 @@ export const MessageAssistant = memo(function MessageAssistant({
   onQuote,
 }: MessageAssistantProps) {
   const { preferences } = useUserPreferences()
-  const answerText = textFromMessage({ parts })
+  // An answer that was once written as two text parts (see lib/parts.ts)
+  // renders -- and copies -- as one.
+  const visibleParts = collapseRepeatedText(parts)
+  const answerText = textFromMessage({ parts: visibleParts })
   const { copied, copy: copyToClipboard } = useCopy(answerText)
   const contentNullOrEmpty = answerText === ""
   const turn = turnFromParts(parts)
@@ -195,7 +199,7 @@ export const MessageAssistant = memo(function MessageAssistant({
         className="relative flex w-full min-w-0 max-w-full flex-col gap-2"
         {...(isQuoteEnabled && { "data-message-id": messageId })}
       >
-        {toBlocks(parts).map((block, i) =>
+        {toBlocks(visibleParts).map((block, i) =>
           block.kind === "tools" ? (
             preferences.showToolInvocations ? (
               <ToolGroup

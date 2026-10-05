@@ -111,6 +111,27 @@ const textOf = (message) =>
   assert.ok(textOf(differs.message).endsWith("![i](data:image/png;base64,AA)"))
 }
 
+// --- A multi-round reply: the final event carries only the LAST segment, so a
+// comparison against the whole streamed text wrongly appends it again. ---
+{
+  const { message } = await run(
+    frames([
+      ["assistant.delta", { delta: "First I checked the files." }],
+      ["tool.started", { tool_name: "terminal", args: { command: "ls" } }],
+      ["tool.completed", { tool_name: "terminal", preview: "ok" }],
+      ["assistant.delta", { delta: "\n\nHere is the answer: 42." }],
+      ["assistant.completed", { content: "Here is the answer: 42." }],
+      ["run.completed", {}],
+    ])
+  )
+  const text = textOf(message)
+  assert.equal(
+    text.split("Here is the answer: 42.").length - 1,
+    1,
+    "the final segment appears once"
+  )
+}
+
 // --- A trimmed authoritative final must not duplicate streamed leading whitespace. ---
 {
   const answer = "The answer was streamed once."
