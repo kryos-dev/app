@@ -37,6 +37,7 @@ import { ToolInvocation } from "./tool-invocation"
 import { turnFromParts } from "@/lib/turn"
 import { collapseRepeatedText } from "@/lib/parts"
 import { splitMediaSegments } from "@/lib/media-tags"
+import { EMPTY_REPLY_TEXT } from "@/lib/assistant-reply"
 import { useAssistantMessageSelection } from "./useAssistantMessageSelection"
 import { isVisiblePart, useCopy } from "./utils"
 import { MediaBlock } from "./media-block"
@@ -152,7 +153,8 @@ export const MessageAssistant = memo(function MessageAssistant({
   const visibleParts = collapseRepeatedText(parts)
   const answerText = textFromMessage({ parts: visibleParts })
   const { copied, copy: copyToClipboard } = useCopy(answerText)
-  const contentNullOrEmpty = answerText === ""
+  const contentNullOrEmpty = answerText.trim() === ""
+  const emptyReply = !streaming && contentNullOrEmpty
   const turn = turnFromParts(parts)
   const { chatId } = useChatSession()
   const { openCanvas } = useWorkspace()
@@ -182,7 +184,7 @@ export const MessageAssistant = memo(function MessageAssistant({
   }, [selectionInfo, onQuote, clearSelection])
 
   // Nothing to draw yet: the conversation shows the single placeholder row.
-  if (!parts.some(isVisiblePart)) return null
+  if (!parts.some(isVisiblePart) && !emptyReply) return null
 
   return (
     <Message
@@ -248,6 +250,12 @@ export const MessageAssistant = memo(function MessageAssistant({
               ) : null
             )
           )
+        )}
+
+        {emptyReply && (
+          <MessageContent className="text-muted-foreground relative w-full min-w-0 max-w-full bg-transparent p-0 text-sm">
+            <p>{EMPTY_REPLY_TEXT}</p>
+          </MessageContent>
         )}
 
         {streaming || contentNullOrEmpty ? null : (

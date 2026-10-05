@@ -11,9 +11,10 @@ export const useFileUpload = () => {
 
   const handleFileUploads = async (
     uid: string,
-    chatId: string
+    chatId: string,
+    filesToUpload: File[] = files
   ): Promise<Attachment[] | null> => {
-    if (files.length === 0) return []
+    if (filesToUpload.length === 0) return []
 
     try {
       await checkFileUploadLimit(uid)
@@ -26,8 +27,8 @@ export const useFileUpload = () => {
     }
 
     try {
-      const processed = await processFiles(files, chatId, uid)
-      setFiles([])
+      const processed = await processFiles(filesToUpload, chatId, uid)
+      setFiles((current) => current.filter((file) => !filesToUpload.includes(file)))
       return processed
     } catch {
       toast({ title: "Failed to process files", status: "error" })

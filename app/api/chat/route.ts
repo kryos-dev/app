@@ -4,6 +4,7 @@ import { isPlaceholderTitle, titleFromMessage } from "@/lib/title-text"
 import { SYSTEM_PROMPT_DEFAULT } from "@/lib/config"
 import { projectContext } from "@/lib/projects/context"
 import { ensureHermesSession, hermesRequest } from "@/lib/hermes/client"
+import { persistedAssistantReply } from "@/lib/assistant-reply"
 import { hermesSessionStreamToUIMessageStream } from "@/lib/hermes/stream"
 import { beginRun, discardRun, endRun } from "@/lib/runs"
 import { THINKING_EFFORTS, THINKING_EFFORT_DEFAULT } from "@/lib/thinking-effort"
@@ -88,21 +89,16 @@ async function finishTurn({
   message: UIMessage
 }) {
   try {
-    // Nothing but bookkeeping parts means nothing was said; no empty row.
-    if (message.parts.some((p) => !p.type.startsWith("data-"))) {
-      await db.insert(schema.messages).values({
-        id: messageId,
-        chatId,
-        userId,
-        role: "assistant",
-        content: message.parts
-          .filter((p): p is { type: "text"; text: string } => p.type === "text")
-          .map((p) => p.text)
-          .join(""),
-        parts: message.parts,
-        model,
-      })
-    }
+    const reply = persistedAssistantReply(message.parts)
+    await db.insert(schema.messages).values({
+      id: messageId,
+      chatId,
+      userId,
+      role: "assistant",
+      content: reply.content,
+      parts: reply.parts,
+      model,
+    })
   } catch (err) {
     console.error("Saving the reply failed:", err)
   }
