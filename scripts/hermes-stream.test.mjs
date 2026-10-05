@@ -111,6 +111,19 @@ const textOf = (message) =>
   assert.ok(textOf(differs.message).endsWith("![i](data:image/png;base64,AA)"))
 }
 
+// --- A trimmed authoritative final must not duplicate streamed leading whitespace. ---
+{
+  const answer = "The answer was streamed once."
+  const { message } = await run(
+    frames([
+      ["assistant.delta", { delta: `\n\n${answer}` }],
+      ["assistant.completed", { content: answer }],
+      ["run.completed", {}],
+    ])
+  )
+  assert.equal(textOf(message), `\n\n${answer}`)
+}
+
 // --- Commentary is text only when it was not already streamed. ---
 {
   const { message } = await run(

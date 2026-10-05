@@ -220,9 +220,11 @@ async function writeHermesSession(
       }
       case "assistant.completed": {
         const content = str(data.content)
-        if (!content || content === streamedText) break
-        if (content.startsWith(streamedText)) {
-          writeTextDelta(content.slice(streamedText.length))
+        const streamedPrefix = streamedText.trimStart()
+        const finalText = content.trimStart()
+        if (!content || content.trim() === streamedText.trim()) break
+        if (finalText.startsWith(streamedPrefix)) {
+          writeTextDelta(finalText.slice(streamedPrefix.length))
         } else {
           closeTextIfOpen()
           writeTextPart(content)
