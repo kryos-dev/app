@@ -49,9 +49,12 @@ export function Conversation({
   return (
     <div className="relative flex h-full w-full flex-col items-center overflow-x-hidden overflow-y-auto">
       {topMask ? (
-        <div className="pointer-events-none absolute top-0 right-0 left-0 z-10 mx-auto flex w-full flex-col justify-center">
-          <div className="h-app-header bg-background flex w-full lg:hidden lg:h-0" />
-          <div className="h-app-header bg-background flex w-full mask-b-from-4% mask-b-to-100% lg:hidden" />
+        // Cover content as it scrolls beneath the transparent mobile header.
+        // A second, fading header layer left prose half-visible behind the bar:
+        // letters became gray and looked clipped mid-message. One solid layer
+        // keeps the controls readable and makes covered text disappear cleanly.
+        <div className="pointer-events-none absolute top-0 right-0 left-0 z-10 mx-auto flex w-full flex-col justify-start">
+          <div className="h-app-header bg-background w-full lg:hidden" />
         </div>
       ) : null}
       <ConversationRoot className="relative w-full">
