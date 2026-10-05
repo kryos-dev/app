@@ -36,8 +36,10 @@ import { QuoteButton } from "./quote-button"
 import { ToolInvocation } from "./tool-invocation"
 import { turnFromParts } from "@/lib/turn"
 import { collapseRepeatedText } from "@/lib/parts"
+import { splitMediaSegments } from "@/lib/media-tags"
 import { useAssistantMessageSelection } from "./useAssistantMessageSelection"
 import { isVisiblePart, useCopy } from "./utils"
+import { MediaBlock } from "./media-block"
 
 type Part = UIMessage["parts"][number]
 type ReasoningPart = Extract<Part, { type: "reasoning" }>
@@ -222,21 +224,27 @@ export const MessageAssistant = memo(function MessageAssistant({
                   streaming={streaming}
                 />
               ) : segment.text.trim() ? (
-                <MessageContent
-                  key={`${i}-${j}`}
-                  className={cn(
-                    // `anywhere`, not `break-word`: only the former lowers the
-                    // min-content width, so a bare URL wraps instead of being
-                    // clipped by the overflow-hidden wrapper at phone width.
-                    // Tables are reset: their wrapper scrolls sideways, and
-                    // `anywhere` inherited into cells split "deepseek" into
-                    // three-letter lines.
-                    "prose dark:prose-invert relative w-full min-w-0 max-w-full bg-transparent p-0 [overflow-wrap:anywhere] [&_table]:[overflow-wrap:normal]",
-                    "prose-p:text-base prose-p:leading-7 prose-li:text-base prose-li:leading-7 prose-h1:scroll-m-20 prose-h1:text-2xl prose-h1:font-semibold prose-h2:mt-8 prose-h2:scroll-m-20 prose-h2:text-xl prose-h2:mb-3 prose-h2:font-medium prose-h3:scroll-m-20 prose-h3:text-lg prose-h3:font-medium prose-h4:scroll-m-20 prose-h5:scroll-m-20 prose-h6:scroll-m-20 prose-strong:font-medium prose-table:block prose-table:overflow-y-auto"
-                  )}
-                >
-                  <MessageResponse>{segment.text}</MessageResponse>
-                </MessageContent>
+                splitMediaSegments(segment.text).map((piece, k) =>
+                  piece.kind === "media" ? (
+                    <MediaBlock key={`${i}-${j}-${k}`} path={piece.path} />
+                  ) : piece.text.trim() ? (
+                    <MessageContent
+                      key={`${i}-${j}-${k}`}
+                      className={cn(
+                        // `anywhere`, not `break-word`: only the former lowers the
+                        // min-content width, so a bare URL wraps instead of being
+                        // clipped by the overflow-hidden wrapper at phone width.
+                        // Tables are reset: their wrapper scrolls sideways, and
+                        // `anywhere` inherited into cells split "deepseek" into
+                        // three-letter lines.
+                        "prose dark:prose-invert relative w-full min-w-0 max-w-full bg-transparent p-0 [overflow-wrap:anywhere] [&_table]:[overflow-wrap:normal]",
+                        "prose-p:text-base prose-p:leading-7 prose-li:text-base prose-li:leading-7 prose-h1:scroll-m-20 prose-h1:text-2xl prose-h1:font-semibold prose-h2:mt-8 prose-h2:scroll-m-20 prose-h2:text-xl prose-h2:mb-3 prose-h2:font-medium prose-h3:scroll-m-20 prose-h3:text-lg prose-h3:font-medium prose-h4:scroll-m-20 prose-h5:scroll-m-20 prose-h6:scroll-m-20 prose-strong:font-medium prose-table:block prose-table:overflow-y-auto"
+                      )}
+                    >
+                      <MessageResponse>{piece.text}</MessageResponse>
+                    </MessageContent>
+                  ) : null
+                )
               ) : null
             )
           )
